@@ -34,3 +34,6 @@ pub mod error;
 
 /// Per-frame warning enums and the unified [`Warning`](warn::Warning) wrapper.
 pub mod warn;
+
+/// The [`Decoded<T, W>`](decoded::Decoded) type returned by all decode paths.
+pub mod decoded;
