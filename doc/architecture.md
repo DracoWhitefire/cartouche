@@ -148,22 +148,23 @@ accumulating packets from the wire is the caller's responsibility. No allocation
 required in cartouche.
 
 The top-level decode entry point takes a single `[u8; 31]` and dispatches on the type
-code:
+code, returning an `InfoFramePacket` — the packet-level decode result type:
 
 ```rust
-pub fn decode(packet: &[u8; 31]) -> Result<Decoded<InfoFrame, Warning>, DecodeError>;
+pub fn decode(packet: &[u8; 31]) -> Result<Decoded<InfoFramePacket, Warning>, DecodeError>;
 ```
 
-For Dynamic HDR packets, this returns a partial result with a continuation — the caller
-feeds subsequent packets until the sequence is complete. The exact API for stateful
-multi-packet decode is defined in the Dynamic HDR section below.
+`InfoFramePacket` is distinct from `InfoFrame` (the encode-path type) because the two
+use cases require different data for Dynamic HDR: the encode side holds an assembled
+`DynamicHdrInfoFrame`, while a single decoded packet can only carry a fragment. See
+the `InfoFramePacket` section below.
 
 ---
 
 ## The `InfoFrame` Enum
 
-The top-level type for decode dispatch and for callers iterating a set of frames to
-transmit:
+The encode-path type. Used by callers that hold a collection of fully assembled frames
+and need to transmit them:
 
 ```rust
 #[non_exhaustive]
@@ -177,12 +178,50 @@ pub enum InfoFrame {
 }
 ```
 
-`Unknown` carries the raw bytes of the payload unmodified. Nothing is discarded. The
-`payload` field is 27 bytes (maximum traditional InfoFrame payload); unknown type codes
-that arrive in multi-packet form are handled separately.
-
 `InfoFrame` implements `IntoPackets`. Dispatching over the enum gives a uniform encoding
-path for callers that hold a collection of frames.
+path regardless of frame type.
+
+`Unknown` carries the raw bytes of the payload unmodified. Nothing is discarded. The
+`payload` field is 27 bytes (maximum traditional InfoFrame payload).
+
+---
+
+## The `InfoFramePacket` Enum
+
+The decode-path type. Returned by the top-level `decode` function when dispatching a
+single wire packet:
+
+```rust
+#[non_exhaustive]
+pub enum InfoFramePacket {
+    Avi(AviInfoFrame),
+    Audio(AudioInfoFrame),
+    HdrStatic(HdrStaticInfoFrame),
+    HdmiForumVsi(HdmiForumVsi),
+    DynamicHdrFragment(DynamicHdrFragment),
+    Unknown { type_code: u8, version: u8, payload: [u8; 27] },
+}
+```
+
+For all single-packet types the variant holds the fully decoded frame, identical to
+what the per-type `decode` method returns. For Dynamic HDR, the variant holds a
+`DynamicHdrFragment` — a single packet's worth of metadata — because a full
+`DynamicHdrInfoFrame` cannot be assembled from one packet.
+
+`DynamicHdrFragment` exposes the fields needed for the caller to accumulate a complete
+sequence:
+
+- `seq_num: u8` — zero-indexed position of this packet in the sequence.
+- `total_bytes: u16` — total metadata byte count declared in the packet header; the
+  sequence is complete when the sum of chunk lengths across all received fragments
+  reaches this value.
+- `format_id: u8` — identifies the metadata format (HDR10+, SL-HDR, etc.).
+- `chunk: [u8; N]` — the metadata bytes carried by this packet.
+
+Once the caller has collected a complete sequence, it passes the packets to
+`DynamicHdrInfoFrame::decode_sequence(&[[u8; 31]])` to assemble the full frame.
+Determining when the sequence is complete and providing the buffer are the caller's
+responsibility; cartouche does not allocate.
 
 ---
 
@@ -473,9 +512,10 @@ The shared machinery that all InfoFrame types depend on:
   `Result<Decoded<T, W>, DecodeError>`. Warning storage is feature-gated: `Vec<W>` with
   `alloc`/`std`, fixed `[Option<W>; 8]` + `num_warnings` in bare `no_std`. Portable
   access via `iter_warnings()` in both builds.
-- `InfoFrame` top-level enum with all five variants and `Unknown`.
-- `InfoFrame` implement `IntoPackets` (dispatches to variant impls).
-- Top-level `decode(packet: &[u8; 31]) -> Result<Decoded<InfoFrame, Warning>, DecodeError>`.
+- `InfoFrame` enum (encode path): all five variants and `Unknown`; implements `IntoPackets`.
+- `InfoFramePacket` enum (decode path): same single-packet variants, plus
+  `DynamicHdrFragment` in place of `DynamicHdr`.
+- Top-level `decode(packet: &[u8; 31]) -> Result<Decoded<InfoFramePacket, Warning>, DecodeError>`.
 
 ### Phase 2 — Traditional InfoFrame types
 
