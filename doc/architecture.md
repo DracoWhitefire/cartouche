@@ -480,6 +480,14 @@ encoding or decoding behaviour.
 - **No unsafe code.** `#![forbid(unsafe_code)]`.
 - **Stable consumer types.** All public structs are `#[non_exhaustive]` for forward
   compatibility.
+- **Full test coverage.** Every InfoFrame type has round-trip tests covering every field
+  variant, every warning condition, and checksum behaviour. The coverage ratchet in CI
+  enforces that coverage does not regress.
+- **Fuzz-tested decode paths.** The decode path accepts arbitrary bytes and must never
+  panic. Fuzz targets verify two invariants: any 31-byte input either decodes
+  successfully (possibly with warnings) or returns `DecodeError::Truncated` — no other
+  outcome is acceptable; and encode followed by decode is identity for well-formed
+  frames.
 
 ---
 
@@ -500,6 +508,13 @@ Before any InfoFrame logic:
 - `CODE_OF_CONDUCT.md` and `CONTRIBUTING.md`, matching the sibling crates.
 - `.github/workflows/ci.yml`: fmt check, clippy (`-D warnings`), docs
   (`-D missing_docs`), test, no_std build check, alloc-only build check.
+- `.github/workflows/fuzz.yml`: matrix over fuzz targets; 60-second smoke run on PRs
+  and pushes, 1-hour deep run on weekly schedule and manual trigger; crash artifacts
+  uploaded on failure. After each deep run, each matrix job uploads its minimised corpus
+  as a workflow artifact; a final `needs: [fuzz]` job downloads all corpora, commits any
+  changes, and opens a `ci/fuzz-corpus` PR if the corpus changed — one PR per deep run
+  covering all targets, following the same `ci/` branch convention as the coverage
+  ratchet.
 - `.github/workflows/audit.yml`: `rustsec/audit-check` on Cargo.toml / Cargo.lock
   changes.
 - `.github/workflows/publish.yml`: tag-triggered publish gated to commits reachable
@@ -573,6 +588,8 @@ Order of implementation (roughly increasing complexity):
 
 - `doc/testing.md`: testing strategy, round-trip property testing approach, how to write
   tests against the simulated decode path.
+- Fuzz targets (`fuzz/fuzz_targets/`): one target per InfoFrame type exercising the
+  no-panic and round-trip invariants. Run via `cargo fuzz`.
 - Simulation example (`examples/roundtrip` or similar): construct one of each InfoFrame
   type, encode to packets, decode from packets, assert field equality.
 - `doc/roadmap.md`: what is released, what is planned.
