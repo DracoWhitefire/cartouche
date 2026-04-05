@@ -216,7 +216,10 @@ sequence:
   sequence is complete when the sum of chunk lengths across all received fragments
   reaches this value.
 - `format_id: u8` — identifies the metadata format (HDR10+, SL-HDR, etc.).
-- `chunk: [u8; N]` — the metadata bytes carried by this packet.
+- `chunk: [u8; 29]` — the metadata bytes carried by this packet.
+- `chunk_len: u8` — number of valid bytes in `chunk`; always ≤ 29. The final packet in
+  a sequence may carry fewer than 29 bytes; `chunk[..chunk_len as usize]` is the
+  meaningful slice. All other packets carry exactly 29 bytes.
 
 Once the caller has collected a complete sequence, it passes the packets to
 `DynamicHdrInfoFrame::decode_sequence(&[[u8; 31]])` to assemble the full frame.
