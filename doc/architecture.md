@@ -264,9 +264,12 @@ carries the raw byte. The frame is still returned.
 
 ### Truncated input
 
-A packet that is shorter than the length declared in its header cannot be recovered from.
-This is the one case that returns a hard `DecodeError::Truncated`. All other anomalies
-are warnings.
+The `length` field in the packet header declares the number of payload bytes. Since the
+input buffer is always exactly `[u8; 31]`, truncation is not a buffer-overrun check —
+it is a validity check on the `length` field itself: if `length > 27` (the maximum
+payload capacity of a 31-byte packet) the packet cannot be decoded. This is the one case
+that returns a hard `DecodeError::Truncated { claimed: u8, available: u8 }`. All other
+anomalies are warnings.
 
 ### Warning types
 
