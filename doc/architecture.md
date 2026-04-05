@@ -191,7 +191,7 @@ path for callers that hold a collection of frames.
 ### Checksum
 
 The checksum byte is verified on decode. If the sum of all 31 bytes is not 0x00 mod 256,
-a `Warning::ChecksumMismatch { expected: u8, found: u8 }` is attached to the decoded
+a `ChecksumMismatch { expected: u8, found: u8 }` variant is attached to the decoded
 result. The frame is still returned; the caller decides whether to act on it. This follows
 the piaf and concordance pattern: a suspicious but parseable input is a warning, not a
 parse failure.
@@ -210,14 +210,45 @@ checksum is still verified and a warning attached if it fails.
 Fields that contain values outside the specified range (a reserved colorimetry code,
 an undefined EOTF value, a VIC not listed in the spec) decode to their typed
 representation where possible and attach a warning. Where no typed representation exists
-for the value (e.g. a reserved enum discriminant), a typed `Warning` variant carries the
-raw byte. The frame is still returned.
+for the value (e.g. a reserved enum discriminant), an `UnknownEnumValue` warning variant
+carries the raw byte. The frame is still returned.
 
 ### Truncated input
 
 A packet that is shorter than the length declared in its header cannot be recovered from.
 This is the one case that returns a hard `DecodeError::Truncated`. All other anomalies
 are warnings.
+
+### Warning types
+
+Each InfoFrame type has its own warning enum — `AviWarning`, `AudioWarning`,
+`HdrStaticWarning`, `HdmiForumVsiWarning`, `DynamicHdrWarning`. This is the `W`
+parameter in `Result<Decoded<Self, W>, DecodeError>`. Per-frame enums allow callers that
+decode a specific type directly to exhaustively match without an `_ =>` arm.
+
+All per-frame warning enums share a common set of variants:
+
+- `ChecksumMismatch { expected: u8, found: u8 }` — packet checksum does not verify.
+- `ReservedFieldNonZero { byte: u8, bit: u8 }` — a reserved field is set.
+- `UnknownEnumValue { field: &'static str, raw: u8 }` — a field contains a value not
+  defined in the spec at the time cartouche was written.
+
+The top-level `decode` function, which dispatches on the type code, uses a unified
+`Warning` enum that wraps the per-frame types:
+
+```rust
+#[non_exhaustive]
+pub enum Warning {
+    Avi(AviWarning),
+    Audio(AudioWarning),
+    HdrStatic(HdrStaticWarning),
+    HdmiForumVsi(HdmiForumVsiWarning),
+    DynamicHdr(DynamicHdrWarning),
+}
+```
+
+Callers using the top-level dispatch receive `Warning`; the wrapped per-frame variant is
+accessible by matching.
 
 ### Warning storage in `Decoded<T, W>`
 
@@ -417,18 +448,21 @@ Before any InfoFrame logic:
   `architecture.md`).
 - `.coverage-baseline` file.
 
-### Phase 1 — Core types and infrastructure (0.1.0 prerequisite)
+### Phase 1 — Core types and infrastructure
 
 The shared machinery that all InfoFrame types depend on:
 
 - `IntoPackets` trait: iterator-based encoding interface, yields `[u8; 31]`.
 - Checksum computation: `compute_checksum(header_and_payload: &[u8]) -> u8`, used by
   all encode paths.
-- Checksum verification: called on every decode path, attaches `Warning::ChecksumMismatch`
-  on mismatch.
+- Checksum verification: called on every decode path, attaches a `ChecksumMismatch`
+  variant on the per-frame warning type on mismatch.
 - `DecodeError` type: `Truncated` is the only hard decode failure.
-- `Warning` type (or per-frame warning enums): `ChecksumMismatch`, `ReservedFieldNonZero`,
-  `UnknownEnumValue { field: &'static str, raw: u8 }`.
+- Per-frame warning enums (`AviWarning`, `AudioWarning`, `HdrStaticWarning`,
+  `HdmiForumVsiWarning`, `DynamicHdrWarning`), each with `ChecksumMismatch`,
+  `ReservedFieldNonZero`, and `UnknownEnumValue { field: &'static str, raw: u8 }` variants.
+- Unified `Warning` enum wrapping the five per-frame types, used by the top-level
+  `decode` dispatch.
 - `Decoded<T, W>` type: pairs a decoded frame with its warnings. The success side of
   `Result<Decoded<T, W>, DecodeError>`. Warning storage is feature-gated: `Vec<W>` with
   `alloc`/`std`, fixed `[Option<W>; 8]` + `num_warnings` in bare `no_std`. Portable
@@ -437,13 +471,13 @@ The shared machinery that all InfoFrame types depend on:
 - `InfoFrame` implement `IntoPackets` (dispatches to variant impls).
 - Top-level `decode(packet: &[u8; 31]) -> Result<Decoded<InfoFrame, Warning>, DecodeError>`.
 
-### Phase 2 — Traditional InfoFrame types (0.1.0)
+### Phase 2 — Traditional InfoFrame types
 
 Implement encode and decode for each single-packet InfoFrame type. Each type gets:
 
 - a typed struct with named fields,
 - `IntoPackets` impl that builds the 31-byte packet, computes the checksum,
-- `decode(&[u8; 31]) -> Result<Decoded<Self, Warning>, DecodeError>`,
+- `decode(&[u8; 31]) -> Result<Decoded<Self, XxxWarning>, DecodeError>` (where `Xxx` is the frame type),
 - a variant in `InfoFrame`,
 - rustdoc on every public item,
 - unit tests covering round-trip encode/decode, out-of-spec field warnings, and
@@ -458,12 +492,12 @@ Order of implementation (roughly increasing complexity):
    colorimetry and ACE field chain, bar data conditionals, RGB vs. YCC quantization
    range handling.
 
-### Phase 3 — Dynamic HDR InfoFrame (0.1.0 or 0.2.0)
+### Phase 3 — Dynamic HDR InfoFrame
 
 - `DynamicHdrInfoFrame` typed struct, wrapping per-format variants.
 - `IntoPackets` impl: packet boundary alignment, sequence numbering, per-packet byte
   count and format identifier fields, final partial-chunk handling.
-- `decode_sequence(&[[u8; 31]]) -> Result<Decoded<DynamicHdrInfoFrame, Warning>, DecodeError>`:
+- `decode_sequence(&[[u8; 31]]) -> Result<Decoded<DynamicHdrInfoFrame, DynamicHdrWarning>, DecodeError>`:
   assembles payload from the packet sequence, dispatches on format identifier.
 - `DynamicHdrInfoFrame` variant in `InfoFrame`.
 - Stateful decode context for callers that receive packets one at a time and need to
