@@ -126,8 +126,10 @@ for packet in frame.into_packets() {
 }
 ```
 
-No allocation is required for encoding. The iterator is a state machine over the typed
-struct.
+No allocation is required for encoding. The iterator is a state machine that owns the
+typed struct — `into_packets(self)` moves the frame into the iterator. The `Iter`
+associated type carries no lifetime parameter. Callers that need to retain the frame
+after encoding should clone it before calling `into_packets`.
 
 ### Decode
 
