@@ -31,3 +31,6 @@ mod checksum;
 
 /// The [`DecodeError`](error::DecodeError) type.
 pub mod error;
+
+/// Per-frame warning enums and the unified [`Warning`](warn::Warning) wrapper.
+pub mod warn;
