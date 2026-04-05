@@ -447,6 +447,10 @@ section above for the full layout.
 A possible future `alloc`-only convenience: collecting all packets from a frame into a
 `Vec<[u8; 31]>`. The core encode/decode API is always alloc-free regardless of features.
 
+A `serde` feature flag (optional, no implied `std`) enables `Serialize` and `Deserialize`
+on all public types, matching the convention of the sibling crates. It has no effect on
+encoding or decoding behaviour.
+
 ---
 
 ## Design Principles
