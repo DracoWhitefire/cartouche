@@ -37,3 +37,17 @@ pub mod warn;
 
 /// The [`Decoded<T, W>`](decoded::Decoded) type returned by all decode paths.
 pub mod decoded;
+
+/// The [`AudioInfoFrame`](audio::AudioInfoFrame) type.
+pub mod audio;
+/// The [`AviInfoFrame`](avi::AviInfoFrame) type.
+pub mod avi;
+/// The [`DynamicHdrInfoFrame`](dynamic_hdr::DynamicHdrInfoFrame) and [`DynamicHdrFragment`](dynamic_hdr::DynamicHdrFragment) types.
+pub mod dynamic_hdr;
+/// The [`HdmiForumVsi`](hdmi_forum_vsi::HdmiForumVsi) type.
+pub mod hdmi_forum_vsi;
+/// The [`HdrStaticInfoFrame`](hdr_static::HdrStaticInfoFrame) type.
+pub mod hdr_static;
+
+/// The [`InfoFrame`](frame::InfoFrame) and [`InfoFramePacket`](frame::InfoFramePacket) enums.
+pub mod frame;
