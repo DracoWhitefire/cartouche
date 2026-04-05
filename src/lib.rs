@@ -23,3 +23,9 @@ extern crate alloc;
 
 #[cfg(feature = "std")]
 extern crate std;
+
+/// The [`IntoPackets`](encode::IntoPackets) encoding trait.
+pub mod encode;
+
+/// The [`DecodeError`](error::DecodeError) type.
+pub mod error;
