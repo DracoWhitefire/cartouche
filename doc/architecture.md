@@ -226,6 +226,11 @@ Once the caller has collected a complete sequence, it passes the packets to
 Determining when the sequence is complete and providing the buffer are the caller's
 responsibility; cartouche does not allocate.
 
+The `Unknown` variant covers packets whose type code is not recognised at all. A Dynamic
+HDR packet with an unrecognised format identifier does not become `Unknown` — it decodes
+to `DynamicHdrFragment` with the raw `format_id` preserved. `Unknown` is a type-code
+catch-all, not a format catch-all.
+
 ---
 
 ## Decode Error Handling
