@@ -51,3 +51,6 @@ pub mod hdr_static;
 
 /// The [`InfoFrame`](frame::InfoFrame) and [`InfoFramePacket`](frame::InfoFramePacket) enums.
 pub mod frame;
+
+mod decode;
+pub use decode::decode;
