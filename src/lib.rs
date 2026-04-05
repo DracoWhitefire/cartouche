@@ -27,5 +27,7 @@ extern crate std;
 /// The [`IntoPackets`](encode::IntoPackets) encoding trait.
 pub mod encode;
 
+mod checksum;
+
 /// The [`DecodeError`](error::DecodeError) type.
 pub mod error;
