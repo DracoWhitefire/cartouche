@@ -138,7 +138,7 @@ plus any warnings:
 
 ```rust
 impl AviInfoFrame {
-    pub fn decode(packet: &[u8; 31]) -> Decoded<AviInfoFrame, AviWarning, DecodeError>;
+    pub fn decode(packet: &[u8; 31]) -> Result<Decoded<AviInfoFrame, AviWarning>, DecodeError>;
 }
 ```
 
@@ -151,7 +151,7 @@ The top-level decode entry point takes a single `[u8; 31]` and dispatches on the
 code:
 
 ```rust
-pub fn decode(packet: &[u8; 31]) -> Decoded<InfoFrame, Warning, DecodeError>;
+pub fn decode(packet: &[u8; 31]) -> Result<Decoded<InfoFrame, Warning>, DecodeError>;
 ```
 
 For Dynamic HDR packets, this returns a partial result with a continuation — the caller
@@ -389,10 +389,11 @@ The shared machinery that all InfoFrame types depend on:
 - `DecodeError` type: `Truncated` is the only hard decode failure.
 - `Warning` type (or per-frame warning enums): `ChecksumMismatch`, `ReservedFieldNonZero`,
   `UnknownEnumValue { field: &'static str, raw: u8 }`.
-- `Decoded<T, W>` type: pairs a decoded frame with its warnings.
+- `Decoded<T, W>` type: pairs a decoded frame with its warnings. The success side of
+  `Result<Decoded<T, W>, DecodeError>`.
 - `InfoFrame` top-level enum with all five variants and `Unknown`.
 - `InfoFrame` implement `IntoPackets` (dispatches to variant impls).
-- Top-level `decode(packet: &[u8; 31]) -> Decoded<InfoFrame, Warning, DecodeError>`.
+- Top-level `decode(packet: &[u8; 31]) -> Result<Decoded<InfoFrame, Warning>, DecodeError>`.
 
 ### Phase 2 — Traditional InfoFrame types (0.1.0)
 
@@ -400,7 +401,7 @@ Implement encode and decode for each single-packet InfoFrame type. Each type get
 
 - a typed struct with named fields,
 - `IntoPackets` impl that builds the 31-byte packet, computes the checksum,
-- `decode(&[u8; 31]) -> Decoded<Self, Warning, DecodeError>`,
+- `decode(&[u8; 31]) -> Result<Decoded<Self, Warning>, DecodeError>`,
 - a variant in `InfoFrame`,
 - rustdoc on every public item,
 - unit tests covering round-trip encode/decode, out-of-spec field warnings, and
@@ -420,7 +421,7 @@ Order of implementation (roughly increasing complexity):
 - `DynamicHdrInfoFrame` typed struct, wrapping per-format variants.
 - `IntoPackets` impl: packet boundary alignment, sequence numbering, per-packet byte
   count and format identifier fields, final partial-chunk handling.
-- `decode_sequence(&[[u8; 31]]) -> Decoded<DynamicHdrInfoFrame, Warning, DecodeError>`:
+- `decode_sequence(&[[u8; 31]]) -> Result<Decoded<DynamicHdrInfoFrame, Warning>, DecodeError>`:
   assembles payload from the packet sequence, dispatches on format identifier.
 - `DynamicHdrInfoFrame` variant in `InfoFrame`.
 - Stateful decode context for callers that receive packets one at a time and need to
