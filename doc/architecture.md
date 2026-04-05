@@ -250,6 +250,12 @@ pub enum Warning {
 Callers using the top-level dispatch receive `Warning`; the wrapped per-frame variant is
 accessible by matching.
 
+The common variants (`ChecksumMismatch`, `ReservedFieldNonZero`, `UnknownEnumValue`) are
+duplicated across each per-frame enum rather than factored into a shared inner type. A
+`Common(CommonWarning)` variant in each per-frame enum would eliminate the duplication but
+add an extra match level at every call site. Three shared variants do not justify that
+cost; the duplication is intentional.
+
 ### Warning storage in `Decoded<T, W>`
 
 `Decoded<T, W>` stores warnings in a feature-gated layout that mirrors piaf's
