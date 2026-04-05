@@ -219,6 +219,43 @@ A packet that is shorter than the length declared in its header cannot be recove
 This is the one case that returns a hard `DecodeError::Truncated`. All other anomalies
 are warnings.
 
+### Warning storage in `Decoded<T, W>`
+
+`Decoded<T, W>` stores warnings in a feature-gated layout that mirrors piaf's
+`ParsedEdidRef`:
+
+```rust
+// alloc / std builds
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub warnings: Vec<W>,
+
+// bare no_std builds
+#[cfg(not(any(feature = "alloc", feature = "std")))]
+pub warnings: [Option<W>; 8],
+#[cfg(not(any(feature = "alloc", feature = "std")))]
+pub num_warnings: usize,
+```
+
+Access is always through `iter_warnings()`, which has two cfg'd implementations with
+identical signatures from the caller's perspective:
+
+```rust
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub fn iter_warnings(&self) -> impl Iterator<Item = &W>;
+
+#[cfg(not(any(feature = "alloc", feature = "std")))]
+pub fn iter_warnings(&self) -> impl Iterator<Item = &W>;
+```
+
+In bare `no_std` builds, warnings beyond the 8-slot capacity are silently dropped. In
+practice no InfoFrame decode path produces more than a handful of warnings; this limit
+is a safeguard, not an expected boundary.
+
+Unlike piaf's alloc build, which uses a type-erased `Arc<dyn Error + Send + Sync>` to
+keep the warning channel open for extension handlers, cartouche uses `Vec<W>` directly.
+The warning set is closed and spec-defined; there are no extension handlers, so
+type-erasure adds complexity without benefit.
+
 ---
 
 ## InfoFrame Types
@@ -310,13 +347,16 @@ format identifiers decode to `DynamicHdrInfoFrame::Unknown { format_id: u8, payl
 
 ## `no_std` Compatibility
 
-`cartouche` declares `#![no_std]` and `#![forbid(unsafe_code)]`. The full API is
-available without an allocator. No `Vec`, no heap. All encoding is done through
-iterators over stack-allocated state; all decoding takes caller-provided slices.
+`cartouche` declares `#![no_std]` and `#![forbid(unsafe_code)]`. All encoding is done
+through iterators over stack-allocated state; all decoding takes caller-provided slices.
 
-An `alloc` feature and a `std` feature (which implies `alloc`) are reserved for future
-use if a higher-level convenience API (e.g., collecting all packets from a frame into a
-`Vec<[u8; 31]>`) is added. The core encode/decode API is always alloc-free.
+The `alloc` feature (implied by `std`) has one concrete effect on the core API:
+`Decoded<T, W>` switches its warning storage from a fixed `[Option<W>; 8]` array to a
+`Vec<W>`, removing the 8-warning cap. See the "Warning storage in `Decoded<T, W>`"
+section above for the full layout.
+
+A possible future `alloc`-only convenience: collecting all packets from a frame into a
+`Vec<[u8; 31]>`. The core encode/decode API is always alloc-free regardless of features.
 
 ---
 
@@ -390,7 +430,9 @@ The shared machinery that all InfoFrame types depend on:
 - `Warning` type (or per-frame warning enums): `ChecksumMismatch`, `ReservedFieldNonZero`,
   `UnknownEnumValue { field: &'static str, raw: u8 }`.
 - `Decoded<T, W>` type: pairs a decoded frame with its warnings. The success side of
-  `Result<Decoded<T, W>, DecodeError>`.
+  `Result<Decoded<T, W>, DecodeError>`. Warning storage is feature-gated: `Vec<W>` with
+  `alloc`/`std`, fixed `[Option<W>; 8]` + `num_warnings` in bare `no_std`. Portable
+  access via `iter_warnings()` in both builds.
 - `InfoFrame` top-level enum with all five variants and `Unknown`.
 - `InfoFrame` implement `IntoPackets` (dispatches to variant impls).
 - Top-level `decode(packet: &[u8; 31]) -> Result<Decoded<InfoFrame, Warning>, DecodeError>`.
