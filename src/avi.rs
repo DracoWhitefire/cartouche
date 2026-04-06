@@ -610,6 +610,140 @@ mod tests {
     }
 
     #[test]
+    fn color_format_variants_round_trip() {
+        for fmt in [
+            ColorFormat::Rgb444,
+            ColorFormat::YCbCr422,
+            ColorFormat::YCbCr420,
+        ] {
+            let frame = AviInfoFrame {
+                color_format: fmt,
+                ..full_frame()
+            };
+            let packet = frame.clone().into_packets().next().unwrap();
+            let decoded = AviInfoFrame::decode(&packet).unwrap();
+            assert_eq!(decoded.value.color_format, fmt);
+        }
+    }
+
+    #[test]
+    fn scan_info_and_colorimetry_variants_round_trip() {
+        for (scan, c) in [
+            (ScanInfo::NoData, Colorimetry::NoData),
+            (ScanInfo::Overscanned, Colorimetry::Bt601),
+            (ScanInfo::Underscanned, Colorimetry::Bt709),
+        ] {
+            let frame = AviInfoFrame {
+                scan_info: scan,
+                colorimetry: c,
+                ..full_frame()
+            };
+            let packet = frame.clone().into_packets().next().unwrap();
+            let decoded = AviInfoFrame::decode(&packet).unwrap();
+            assert_eq!(decoded.value.scan_info, scan);
+            assert_eq!(decoded.value.colorimetry, c);
+        }
+    }
+
+    #[test]
+    fn bar_info_and_aspect_ratio_variants_round_trip() {
+        for (bar, aspect) in [
+            (BarInfo::NotPresent, PictureAspectRatio::NoData),
+            (
+                BarInfo::VerticalBarsPresent,
+                PictureAspectRatio::FourByThree,
+            ),
+            (
+                BarInfo::HorizontalBarsPresent,
+                PictureAspectRatio::SixteenByNine,
+            ),
+        ] {
+            let frame = AviInfoFrame {
+                bar_info: bar,
+                picture_aspect_ratio: aspect,
+                ..full_frame()
+            };
+            let packet = frame.clone().into_packets().next().unwrap();
+            let decoded = AviInfoFrame::decode(&packet).unwrap();
+            assert_eq!(decoded.value.bar_info, bar);
+            assert_eq!(decoded.value.picture_aspect_ratio, aspect);
+        }
+    }
+
+    #[test]
+    fn quantization_and_scaling_variants_round_trip() {
+        for (rgb_q, ycc_q, sc) in [
+            (
+                RgbQuantization::Default,
+                YccQuantization::FullRange,
+                NonUniformScaling::Horizontal,
+            ),
+            (
+                RgbQuantization::LimitedRange,
+                YccQuantization::LimitedRange,
+                NonUniformScaling::Vertical,
+            ),
+            (
+                RgbQuantization::FullRange,
+                YccQuantization::LimitedRange,
+                NonUniformScaling::Both,
+            ),
+        ] {
+            let frame = AviInfoFrame {
+                rgb_quantization: rgb_q,
+                ycc_quantization: ycc_q,
+                non_uniform_scaling: sc,
+                ..full_frame()
+            };
+            let packet = frame.clone().into_packets().next().unwrap();
+            let decoded = AviInfoFrame::decode(&packet).unwrap();
+            assert_eq!(decoded.value.rgb_quantization, rgb_q);
+            assert_eq!(decoded.value.ycc_quantization, ycc_q);
+            assert_eq!(decoded.value.non_uniform_scaling, sc);
+        }
+    }
+
+    #[test]
+    fn it_content_type_variants_round_trip() {
+        for cn in [
+            ItContentType::Graphics,
+            ItContentType::Photo,
+            ItContentType::Game,
+        ] {
+            let frame = AviInfoFrame {
+                it_content: true,
+                it_content_type: cn,
+                ..full_frame()
+            };
+            let packet = frame.clone().into_packets().next().unwrap();
+            let decoded = AviInfoFrame::decode(&packet).unwrap();
+            assert_eq!(decoded.value.it_content_type, cn);
+        }
+    }
+
+    #[test]
+    fn extended_colorimetry_variants_round_trip() {
+        for ec in [
+            ExtendedColorimetry::XvYCC601,
+            ExtendedColorimetry::XvYCC709,
+            ExtendedColorimetry::SyCC601,
+            ExtendedColorimetry::OpYCC601,
+            ExtendedColorimetry::OpRgb,
+            ExtendedColorimetry::Bt2020cYCC,
+            ExtendedColorimetry::AdditionalColorimetryExtension,
+        ] {
+            let frame = AviInfoFrame {
+                colorimetry: Colorimetry::Extended,
+                extended_colorimetry: ec,
+                ..full_frame()
+            };
+            let packet = frame.clone().into_packets().next().unwrap();
+            let decoded = AviInfoFrame::decode(&packet).unwrap();
+            assert_eq!(decoded.value.extended_colorimetry, ec);
+        }
+    }
+
+    #[test]
     fn short_packet_leaves_bar_data_zeroed() {
         // Encode a minimal packet with length=5 (no bar data).
         let mut packet = full_frame().into_packets().next().unwrap();

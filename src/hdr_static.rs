@@ -329,6 +329,71 @@ mod tests {
     }
 
     #[test]
+    fn eotf_variants_round_trip() {
+        for eotf in [
+            Eotf::TraditionalGammaSdr,
+            Eotf::TraditionalGammaHdr,
+            Eotf::Hlg,
+        ] {
+            let frame = HdrStaticInfoFrame {
+                eotf,
+                ..type1_frame()
+            };
+            let packet = frame.clone().into_packets().next().unwrap();
+            let decoded = HdrStaticInfoFrame::decode(&packet).unwrap();
+            assert!(decoded.iter_warnings().next().is_none());
+            assert_eq!(decoded.value.eotf, eotf);
+        }
+    }
+
+    #[test]
+    fn unknown_metadata_round_trip() {
+        let mut data = [0u8; 26];
+        data[0] = 0xAB;
+        data[25] = 0xCD;
+        let frame = HdrStaticInfoFrame {
+            eotf: Eotf::Pq,
+            metadata: StaticMetadata::Unknown {
+                descriptor_id: 3,
+                data,
+            },
+        };
+        let packet = frame.clone().into_packets().next().unwrap();
+        let decoded = HdrStaticInfoFrame::decode(&packet).unwrap();
+        assert!(decoded.iter_warnings().any(|w| matches!(
+            w,
+            HdrStaticWarning::UnknownEnumValue {
+                field: "static_metadata_descriptor_id",
+                raw: 3
+            }
+        )));
+        if let StaticMetadata::Unknown {
+            descriptor_id,
+            data: d,
+        } = decoded.value.metadata
+        {
+            assert_eq!(descriptor_id, 3);
+            assert_eq!(d[0], 0xAB);
+            assert_eq!(d[25], 0xCD);
+        } else {
+            panic!("expected Unknown metadata variant");
+        }
+    }
+
+    #[test]
+    fn reserved_pb1_bits_warning() {
+        let mut packet = type1_frame().into_packets().next().unwrap();
+        packet[4] |= 0x40; // set reserved bit 6 of PB1
+        let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        packet[3] = packet[3].wrapping_sub(sum);
+        let decoded = HdrStaticInfoFrame::decode(&packet).unwrap();
+        assert!(decoded.iter_warnings().any(|w| matches!(
+            w,
+            HdrStaticWarning::ReservedFieldNonZero { byte: 4, bit: 6 }
+        )));
+    }
+
+    #[test]
     fn unknown_descriptor_id_warns() {
         let mut packet = type1_frame().into_packets().next().unwrap();
         packet[4] = (packet[4] & !0x38) | (0x05 << 3); // set descriptor_id to 5

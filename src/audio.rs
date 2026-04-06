@@ -455,6 +455,111 @@ mod tests {
     }
 
     #[test]
+    fn coding_types_round_trip() {
+        for ct in [
+            AudioCodingType::Ac3,
+            AudioCodingType::Mpeg1,
+            AudioCodingType::Mp3,
+            AudioCodingType::Mpeg2Multichannel,
+            AudioCodingType::AacLc,
+            AudioCodingType::Dts,
+            AudioCodingType::Atrac,
+            AudioCodingType::OneBitAudio,
+            AudioCodingType::EnhancedAc3,
+            AudioCodingType::DtsHd,
+            AudioCodingType::MlpTrueHd,
+            AudioCodingType::Dst,
+            AudioCodingType::WmaPro,
+            AudioCodingType::Extension,
+        ] {
+            let frame = AudioInfoFrame {
+                coding_type: ct,
+                ..default_frame()
+            };
+            let packet = frame.clone().into_packets().next().unwrap();
+            let decoded = AudioInfoFrame::decode(&packet).unwrap();
+            assert_eq!(decoded.value.coding_type, ct);
+        }
+    }
+
+    #[test]
+    fn sample_freq_and_size_variants_round_trip() {
+        for (sf, ss) in [
+            (SampleFrequency::Hz32000, SampleSize::ReferToStream),
+            (SampleFrequency::Hz44100, SampleSize::Bits20),
+            (SampleFrequency::Hz88200, SampleSize::Bits16),
+            (SampleFrequency::Hz96000, SampleSize::Bits24),
+            (SampleFrequency::Hz176400, SampleSize::Bits16),
+            (SampleFrequency::Hz192000, SampleSize::Bits16),
+        ] {
+            let frame = AudioInfoFrame {
+                sample_freq: sf,
+                sample_size: ss,
+                ..default_frame()
+            };
+            let packet = frame.clone().into_packets().next().unwrap();
+            let decoded = AudioInfoFrame::decode(&packet).unwrap();
+            assert_eq!(decoded.value.sample_freq, sf);
+            assert_eq!(decoded.value.sample_size, ss);
+        }
+    }
+
+    #[test]
+    fn lfe_playback_levels_round_trip() {
+        for lsv in [LfePlaybackLevel::NoInfo, LfePlaybackLevel::Plus10Db] {
+            let frame = AudioInfoFrame {
+                lfe_playback_level: lsv,
+                ..default_frame()
+            };
+            let packet = frame.clone().into_packets().next().unwrap();
+            let decoded = AudioInfoFrame::decode(&packet).unwrap();
+            assert_eq!(decoded.value.lfe_playback_level, lsv);
+        }
+    }
+
+    #[test]
+    fn reserved_pb2_bits_warning() {
+        let mut packet = default_frame().into_packets().next().unwrap();
+        packet[5] |= 0x80; // set reserved bit 7 of PB2
+        let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        packet[3] = packet[3].wrapping_sub(sum);
+        let decoded = AudioInfoFrame::decode(&packet).unwrap();
+        assert!(
+            decoded
+                .iter_warnings()
+                .any(|w| matches!(w, AudioWarning::ReservedFieldNonZero { byte: 5, bit: 7 }))
+        );
+    }
+
+    #[test]
+    fn reserved_pb3_bits_warning() {
+        let mut packet = default_frame().into_packets().next().unwrap();
+        packet[6] |= 0x20; // set reserved bit 5 of PB3
+        let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        packet[3] = packet[3].wrapping_sub(sum);
+        let decoded = AudioInfoFrame::decode(&packet).unwrap();
+        assert!(
+            decoded
+                .iter_warnings()
+                .any(|w| matches!(w, AudioWarning::ReservedFieldNonZero { byte: 6, bit: 5 }))
+        );
+    }
+
+    #[test]
+    fn reserved_pb5_bits_warning() {
+        let mut packet = default_frame().into_packets().next().unwrap();
+        packet[8] |= 0x01; // set reserved bit 0 of PB5
+        let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        packet[3] = packet[3].wrapping_sub(sum);
+        let decoded = AudioInfoFrame::decode(&packet).unwrap();
+        assert!(
+            decoded
+                .iter_warnings()
+                .any(|w| matches!(w, AudioWarning::ReservedFieldNonZero { byte: 8, bit: 0 }))
+        );
+    }
+
+    #[test]
     fn refer_to_stream_fields_round_trip() {
         let frame = AudioInfoFrame {
             coding_type: AudioCodingType::ReferToStream,

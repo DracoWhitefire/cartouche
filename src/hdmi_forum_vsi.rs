@@ -320,6 +320,83 @@ mod tests {
     }
 
     #[test]
+    fn unknown_frl_rate_warns_and_decodes() {
+        let mut packet = full_frame().into_packets().next().unwrap();
+        // frl_rate occupies PB4 bits [6:4]; set to 0x07 (7) which is out of spec
+        packet[7] = (packet[7] & 0x8F) | (0x07 << 4);
+        let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        packet[3] = packet[3].wrapping_sub(sum);
+        let decoded = HdmiForumVsi::decode(&packet).unwrap();
+        assert!(decoded.iter_warnings().any(|w| matches!(
+            w,
+            HdmiForumVsiWarning::UnknownEnumValue {
+                field: "frl_rate",
+                raw: 7
+            }
+        )));
+    }
+
+    #[test]
+    fn reserved_bits_pb7_warning() {
+        let mut packet = full_frame().into_packets().next().unwrap();
+        packet[10] |= 0x08; // set reserved bit 3 of PB7 (byte 10)
+        let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        packet[3] = packet[3].wrapping_sub(sum);
+        let decoded = HdmiForumVsi::decode(&packet).unwrap();
+        assert!(decoded.iter_warnings().any(|w| matches!(
+            w,
+            HdmiForumVsiWarning::ReservedFieldNonZero { byte: 10, bit: 3 }
+        )));
+    }
+
+    #[test]
+    fn reserved_bits_pb8_warning() {
+        let mut packet = full_frame().into_packets().next().unwrap();
+        packet[11] |= 0x10; // set reserved bit 4 of PB8 (byte 11)
+        let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        packet[3] = packet[3].wrapping_sub(sum);
+        let decoded = HdmiForumVsi::decode(&packet).unwrap();
+        assert!(decoded.iter_warnings().any(|w| matches!(
+            w,
+            HdmiForumVsiWarning::ReservedFieldNonZero { byte: 11, bit: 4 }
+        )));
+    }
+
+    #[test]
+    fn unknown_dsc_max_frl_rate_warns() {
+        let mut packet = full_frame().into_packets().next().unwrap();
+        // dsc_max_frl_rate occupies PB7 bits [2:0]; set to 7 (out of spec)
+        packet[10] = (packet[10] & 0xF8) | 0x07;
+        let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        packet[3] = packet[3].wrapping_sub(sum);
+        let decoded = HdmiForumVsi::decode(&packet).unwrap();
+        assert!(decoded.iter_warnings().any(|w| matches!(
+            w,
+            HdmiForumVsiWarning::UnknownEnumValue {
+                field: "dsc_max_frl_rate",
+                raw: 7
+            }
+        )));
+    }
+
+    #[test]
+    fn unknown_dsc_max_slices_warns() {
+        let mut packet = full_frame().into_packets().next().unwrap();
+        // dsc_max_slices occupies PB8 bits [3:0]; set to 0x0F (out of spec)
+        packet[11] = (packet[11] & 0xF0) | 0x0F;
+        let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        packet[3] = packet[3].wrapping_sub(sum);
+        let decoded = HdmiForumVsi::decode(&packet).unwrap();
+        assert!(decoded.iter_warnings().any(|w| matches!(
+            w,
+            HdmiForumVsiWarning::UnknownEnumValue {
+                field: "dsc_max_slices",
+                raw: 15
+            }
+        )));
+    }
+
+    #[test]
     fn reserved_bit_warning() {
         let mut packet = full_frame().into_packets().next().unwrap();
         packet[7] |= 0x01; // set reserved bit 0 of PB4
