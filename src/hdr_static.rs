@@ -213,7 +213,7 @@ impl IntoPackets for HdrStaticInfoFrame {
 
         match self.metadata {
             StaticMetadata::Type1(md) => {
-                hp[3] = eotf_raw & 0x07; // descriptor_id=0, EOTF
+                hp[3] = eotf_raw & 0x07; // descriptor_id = 0, so no shift needed
 
                 let write_u16 = |buf: &mut [u8; 30], offset: usize, val: u16| {
                     let [lo, hi] = val.to_le_bytes();
