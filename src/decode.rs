@@ -1,6 +1,10 @@
+use crate::audio::AudioInfoFrame;
+use crate::avi::AviInfoFrame;
 use crate::decoded::Decoded;
 use crate::error::DecodeError;
 use crate::frame::InfoFramePacket;
+use crate::hdmi_forum_vsi::{HdmiForumVsi, HDMI_FORUM_OUI};
+use crate::hdr_static::HdrStaticInfoFrame;
 use crate::warn::Warning;
 
 /// Type code constants for known InfoFrame types.
@@ -39,6 +43,13 @@ pub(crate) mod type_code {
 /// [`InfoFramePacket::Unknown`], with the type code, version, and raw payload
 /// bytes preserved.
 ///
+/// # VSIF dispatch
+///
+/// VSIF packets (type code 0x81) are further dispatched on the OUI in
+/// PB1–PB3. Packets carrying the HDMI Forum OUI (0xD8, 0x5D, 0xC4) decode
+/// to [`InfoFramePacket::HdmiForumVsi`]; all others fall through to
+/// `InfoFramePacket::Unknown`.
+///
 /// # Errors
 ///
 /// Returns [`DecodeError::Truncated`] if `packet[2] > 27`.
@@ -56,55 +67,25 @@ pub fn decode(packet: &[u8; 31]) -> Result<Decoded<InfoFramePacket, Warning>, De
     let mut payload = [0u8; 27];
     payload.copy_from_slice(&packet[4..31]);
 
-    // Phase 2 replaces each arm with a call to the per-type decoder, which
-    // handles checksum verification and warning attachment internally.
-    let frame = match type_code {
-        type_code::AVI => {
-            // TODO(phase2): AviInfoFrame::decode(packet).map(...)
-            InfoFramePacket::Unknown {
-                type_code,
-                version,
-                payload,
-            }
-        }
-        type_code::AUDIO => {
-            // TODO(phase2): AudioInfoFrame::decode(packet).map(...)
-            InfoFramePacket::Unknown {
-                type_code,
-                version,
-                payload,
-            }
-        }
-        type_code::HDR_STATIC => {
-            // TODO(phase2): HdrStaticInfoFrame::decode(packet).map(...)
-            InfoFramePacket::Unknown {
-                type_code,
-                version,
-                payload,
-            }
-        }
+    match type_code {
+        type_code::AVI => Ok(AviInfoFrame::decode(packet)?
+            .wrap(InfoFramePacket::Avi, Warning::Avi)),
+        type_code::AUDIO => Ok(AudioInfoFrame::decode(packet)?
+            .wrap(InfoFramePacket::Audio, Warning::Audio)),
+        type_code::HDR_STATIC => Ok(HdrStaticInfoFrame::decode(packet)?
+            .wrap(InfoFramePacket::HdrStatic, Warning::HdrStatic)),
         type_code::VSIF => {
-            // TODO(phase2): inspect OUI at payload[0..3], dispatch to HdmiForumVsi or Unknown
-            InfoFramePacket::Unknown {
-                type_code,
-                version,
-                payload,
+            if packet[4..7] == HDMI_FORUM_OUI {
+                Ok(HdmiForumVsi::decode(packet)?
+                    .wrap(InfoFramePacket::HdmiForumVsi, Warning::HdmiForumVsi))
+            } else {
+                Ok(Decoded::new(InfoFramePacket::Unknown { type_code, version, payload }))
             }
         }
         type_code::DYNAMIC_HDR => {
-            // TODO(phase2): DynamicHdrFragment::decode(packet).map(...)
-            InfoFramePacket::Unknown {
-                type_code,
-                version,
-                payload,
-            }
+            // TODO(phase3): DynamicHdrFragment::decode(packet)
+            Ok(Decoded::new(InfoFramePacket::Unknown { type_code, version, payload }))
         }
-        _ => InfoFramePacket::Unknown {
-            type_code,
-            version,
-            payload,
-        },
-    };
-
-    Ok(Decoded::new(frame))
+        _ => Ok(Decoded::new(InfoFramePacket::Unknown { type_code, version, payload })),
+    }
 }

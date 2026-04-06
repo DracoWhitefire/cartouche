@@ -26,7 +26,7 @@
 ///
 /// The internal storage layout depends on the active feature flags:
 ///
-/// - With `alloc` or `std`: warnings are stored in a [`Vec<W>`], with no cap.
+/// - With `alloc` or `std`: warnings are stored in a `Vec<W>`, with no cap.
 /// - Without either: warnings are stored in a fixed `[Option<W>; 8]` array.
 ///   Warnings beyond the 8-slot cap are silently dropped. In practice no
 ///   InfoFrame decode path produces more than a handful of warnings; this
@@ -76,6 +76,38 @@ impl<T, W> Decoded<T, W> {
             self.warnings[self.num_warnings] = Some(warning);
             self.num_warnings += 1;
         }
+    }
+
+    /// Convert this `Decoded<T, W>` into a `Decoded<U, V>` by mapping both the
+    /// decoded value and each warning.
+    ///
+    /// Ownership of both fields is transferred; no cloning is required.
+    pub(crate) fn wrap<U, V>(
+        self,
+        frame_fn: impl FnOnce(T) -> U,
+        warn_fn: impl Fn(W) -> V,
+    ) -> Decoded<U, V> {
+        let mut out = Decoded::new(frame_fn(self.value));
+
+        #[cfg(any(feature = "alloc", feature = "std"))]
+        for w in self.warnings {
+            out.push_warning(warn_fn(w));
+        }
+
+        #[cfg(not(any(feature = "alloc", feature = "std")))]
+        {
+            let n = self.num_warnings;
+            for (i, opt) in self.warnings.into_iter().enumerate() {
+                if i >= n {
+                    break;
+                }
+                if let Some(w) = opt {
+                    out.push_warning(warn_fn(w));
+                }
+            }
+        }
+
+        out
     }
 
     /// Iterate over all warnings produced during decoding.

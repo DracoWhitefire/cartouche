@@ -1,6 +1,7 @@
 use crate::audio::AudioInfoFrame;
 use crate::avi::AviInfoFrame;
 use crate::dynamic_hdr::{DynamicHdrFragment, DynamicHdrInfoFrame};
+use crate::encode::{IntoPackets, SinglePacketIter};
 use crate::hdmi_forum_vsi::HdmiForumVsi;
 use crate::hdr_static::HdrStaticInfoFrame;
 
@@ -8,7 +9,7 @@ use crate::hdr_static::HdrStaticInfoFrame;
 ///
 /// The encode-path top-level type. Holds a fully assembled InfoFrame of any
 /// known type, or raw bytes for an unknown type code. Implements
-/// [`IntoPackets`](crate::encode::IntoPackets) to yield the wire packet
+/// [`IntoPackets`] to yield the wire packet
 /// sequence for transmission.
 ///
 /// For Dynamic HDR the variant holds a complete [`DynamicHdrInfoFrame`] whose
@@ -82,4 +83,46 @@ pub enum InfoFramePacket {
         /// The raw payload bytes (up to 27).
         payload: [u8; 27],
     },
+}
+
+/// Iterator returned by [`IntoPackets`] for [`InfoFrame`].
+///
+/// Yields a single 31-byte packet for all traditional InfoFrame types.
+/// The Dynamic HDR variant is not yet implemented (Phase 3) and yields no packets.
+pub struct InfoFrameIter(Option<SinglePacketIter>);
+
+impl Iterator for InfoFrameIter {
+    type Item = [u8; 31];
+
+    fn next(&mut self) -> Option<[u8; 31]> {
+        self.0.as_mut()?.next()
+    }
+}
+
+impl IntoPackets for InfoFrame {
+    type Iter = InfoFrameIter;
+
+    fn into_packets(self) -> InfoFrameIter {
+        let iter = match self {
+            InfoFrame::Avi(f)          => Some(f.into_packets()),
+            InfoFrame::Audio(f)        => Some(f.into_packets()),
+            InfoFrame::HdrStatic(f)    => Some(f.into_packets()),
+            InfoFrame::HdmiForumVsi(f) => Some(f.into_packets()),
+            InfoFrame::DynamicHdr(_) => None, // Phase 3
+            InfoFrame::Unknown { type_code, version, payload } => {
+                let mut hp = [0u8; 30];
+                hp[0] = type_code;
+                hp[1] = version;
+                hp[2] = 27;
+                hp[3..30].copy_from_slice(&payload);
+                let checksum = crate::checksum::compute_checksum(&hp);
+                let mut packet = [0u8; 31];
+                packet[..3].copy_from_slice(&hp[..3]);
+                packet[3] = checksum;
+                packet[4..].copy_from_slice(&hp[3..]);
+                Some(SinglePacketIter::new(packet))
+            }
+        };
+        InfoFrameIter(iter)
+    }
 }
