@@ -161,7 +161,10 @@ impl AudioInfoFrame {
     pub fn decode(packet: &[u8; 31]) -> Result<Decoded<AudioInfoFrame, AudioWarning>, DecodeError> {
         let length = packet[2];
         if length > 27 {
-            return Err(DecodeError::Truncated { claimed: length, available: 27 });
+            return Err(DecodeError::Truncated {
+                claimed: length,
+                available: 27,
+            });
         }
 
         let mut decoded = Decoded::new(AudioInfoFrame {
@@ -194,23 +197,23 @@ impl AudioInfoFrame {
         let cc = pb1 & 0x07;
 
         decoded.value.coding_type = match ct {
-            0  => AudioCodingType::ReferToStream,
-            1  => AudioCodingType::Lpcm,
-            2  => AudioCodingType::Ac3,
-            3  => AudioCodingType::Mpeg1,
-            4  => AudioCodingType::Mp3,
-            5  => AudioCodingType::Mpeg2Multichannel,
-            6  => AudioCodingType::AacLc,
-            7  => AudioCodingType::Dts,
-            8  => AudioCodingType::Atrac,
-            9  => AudioCodingType::OneBitAudio,
+            0 => AudioCodingType::ReferToStream,
+            1 => AudioCodingType::Lpcm,
+            2 => AudioCodingType::Ac3,
+            3 => AudioCodingType::Mpeg1,
+            4 => AudioCodingType::Mp3,
+            5 => AudioCodingType::Mpeg2Multichannel,
+            6 => AudioCodingType::AacLc,
+            7 => AudioCodingType::Dts,
+            8 => AudioCodingType::Atrac,
+            9 => AudioCodingType::OneBitAudio,
             10 => AudioCodingType::EnhancedAc3,
             11 => AudioCodingType::DtsHd,
             12 => AudioCodingType::MlpTrueHd,
             13 => AudioCodingType::Dst,
             14 => AudioCodingType::WmaPro,
             15 => AudioCodingType::Extension,
-            _  => unreachable!(), // 4-bit field
+            _ => unreachable!(), // 4-bit field
         };
 
         decoded.value.channel_count = match cc {
@@ -291,22 +294,22 @@ impl IntoPackets for AudioInfoFrame {
 
     fn into_packets(self) -> SinglePacketIter {
         let ct: u8 = match self.coding_type {
-            AudioCodingType::ReferToStream     => 0,
-            AudioCodingType::Lpcm              => 1,
-            AudioCodingType::Ac3               => 2,
-            AudioCodingType::Mpeg1             => 3,
-            AudioCodingType::Mp3               => 4,
+            AudioCodingType::ReferToStream => 0,
+            AudioCodingType::Lpcm => 1,
+            AudioCodingType::Ac3 => 2,
+            AudioCodingType::Mpeg1 => 3,
+            AudioCodingType::Mp3 => 4,
             AudioCodingType::Mpeg2Multichannel => 5,
-            AudioCodingType::AacLc             => 6,
-            AudioCodingType::Dts               => 7,
-            AudioCodingType::Atrac             => 8,
-            AudioCodingType::OneBitAudio       => 9,
-            AudioCodingType::EnhancedAc3       => 10,
-            AudioCodingType::DtsHd             => 11,
-            AudioCodingType::MlpTrueHd         => 12,
-            AudioCodingType::Dst               => 13,
-            AudioCodingType::WmaPro            => 14,
-            AudioCodingType::Extension         => 15,
+            AudioCodingType::AacLc => 6,
+            AudioCodingType::Dts => 7,
+            AudioCodingType::Atrac => 8,
+            AudioCodingType::OneBitAudio => 9,
+            AudioCodingType::EnhancedAc3 => 10,
+            AudioCodingType::DtsHd => 11,
+            AudioCodingType::MlpTrueHd => 12,
+            AudioCodingType::Dst => 13,
+            AudioCodingType::WmaPro => 14,
+            AudioCodingType::Extension => 15,
         };
 
         let cc: u8 = match self.channel_count {
@@ -317,26 +320,26 @@ impl IntoPackets for AudioInfoFrame {
 
         let sf: u8 = match self.sample_freq {
             SampleFrequency::ReferToStream => 0,
-            SampleFrequency::Hz32000       => 1,
-            SampleFrequency::Hz44100       => 2,
-            SampleFrequency::Hz48000       => 3,
-            SampleFrequency::Hz88200       => 4,
-            SampleFrequency::Hz96000       => 5,
-            SampleFrequency::Hz176400      => 6,
-            SampleFrequency::Hz192000      => 7,
+            SampleFrequency::Hz32000 => 1,
+            SampleFrequency::Hz44100 => 2,
+            SampleFrequency::Hz48000 => 3,
+            SampleFrequency::Hz88200 => 4,
+            SampleFrequency::Hz96000 => 5,
+            SampleFrequency::Hz176400 => 6,
+            SampleFrequency::Hz192000 => 7,
         };
 
         let ss: u8 = match self.sample_size {
             SampleSize::ReferToStream => 0,
-            SampleSize::Bits16        => 1,
-            SampleSize::Bits20        => 2,
-            SampleSize::Bits24        => 3,
+            SampleSize::Bits16 => 1,
+            SampleSize::Bits20 => 2,
+            SampleSize::Bits24 => 3,
         };
 
         let lsv: u8 = match self.lfe_playback_level {
-            LfePlaybackLevel::NoInfo   => 0,
+            LfePlaybackLevel::NoInfo => 0,
             LfePlaybackLevel::Plus10Db => 1,
-            LfePlaybackLevel::Ref0Db   => 2,
+            LfePlaybackLevel::Ref0Db => 2,
         };
 
         // Build the 30 bytes that feed into checksum computation:
@@ -345,10 +348,10 @@ impl IntoPackets for AudioInfoFrame {
         hp[0] = 0x84; // type code
         hp[1] = 0x01; // version
         hp[2] = 0x0A; // length = 10
-        hp[3] = (ct << 3) | (cc & 0x07);                           // PB1
-        hp[4] = (sf << 2) | (ss & 0x03);                           // PB2
-        hp[5] = self.coding_ext & 0x1F;                            // PB3
-        hp[6] = self.channel_allocation;                            // PB4
+        hp[3] = (ct << 3) | (cc & 0x07); // PB1
+        hp[4] = (sf << 2) | (ss & 0x03); // PB2
+        hp[5] = self.coding_ext & 0x1F; // PB3
+        hp[6] = self.channel_allocation; // PB4
         hp[7] = ((self.downmix_inhibit as u8) << 7) | (lsv << 3); // PB5
         // PB6–PB10 (hp[8]–hp[12]) are reserved; already zero.
 
@@ -396,7 +399,11 @@ mod tests {
         packet[3] = packet[3].wrapping_add(1); // corrupt the checksum byte
         let decoded = AudioInfoFrame::decode(&packet).unwrap();
         let warnings: alloc::vec::Vec<_> = decoded.iter_warnings().collect();
-        assert!(warnings.iter().any(|w| matches!(w, AudioWarning::ChecksumMismatch { .. })));
+        assert!(
+            warnings
+                .iter()
+                .any(|w| matches!(w, AudioWarning::ChecksumMismatch { .. }))
+        );
         // Frame is still returned intact
         assert_eq!(decoded.value, default_frame());
     }
@@ -407,7 +414,10 @@ mod tests {
         packet[2] = 28; // length > 27
         assert!(matches!(
             AudioInfoFrame::decode(&packet),
-            Err(crate::error::DecodeError::Truncated { claimed: 28, available: 27 })
+            Err(crate::error::DecodeError::Truncated {
+                claimed: 28,
+                available: 27
+            })
         ));
     }
 
@@ -419,10 +429,11 @@ mod tests {
         let sum: u8 = packet[..31].iter().fold(0u8, |a, &b| a.wrapping_add(b));
         packet[3] = packet[3].wrapping_sub(sum);
         let decoded = AudioInfoFrame::decode(&packet).unwrap();
-        assert!(decoded.iter_warnings().any(|w| matches!(
-            w,
-            AudioWarning::ReservedFieldNonZero { byte: 4, bit: 7 }
-        )));
+        assert!(
+            decoded
+                .iter_warnings()
+                .any(|w| matches!(w, AudioWarning::ReservedFieldNonZero { byte: 4, bit: 7 }))
+        );
     }
 
     #[test]
@@ -435,7 +446,10 @@ mod tests {
         let decoded = AudioInfoFrame::decode(&packet).unwrap();
         assert!(decoded.iter_warnings().any(|w| matches!(
             w,
-            AudioWarning::UnknownEnumValue { field: "lfe_playback_level", raw: 15 }
+            AudioWarning::UnknownEnumValue {
+                field: "lfe_playback_level",
+                raw: 15
+            }
         )));
         assert_eq!(decoded.value.lfe_playback_level, LfePlaybackLevel::NoInfo);
     }
