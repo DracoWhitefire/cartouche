@@ -650,8 +650,14 @@ mod tests {
     fn bar_info_and_aspect_ratio_variants_round_trip() {
         for (bar, aspect) in [
             (BarInfo::NotPresent, PictureAspectRatio::NoData),
-            (BarInfo::VerticalBarsPresent, PictureAspectRatio::FourByThree),
-            (BarInfo::HorizontalBarsPresent, PictureAspectRatio::SixteenByNine),
+            (
+                BarInfo::VerticalBarsPresent,
+                PictureAspectRatio::FourByThree,
+            ),
+            (
+                BarInfo::HorizontalBarsPresent,
+                PictureAspectRatio::SixteenByNine,
+            ),
             (BarInfo::BothPresent, PictureAspectRatio::SixteenByNine),
         ] {
             let frame = AviInfoFrame {
@@ -831,7 +837,10 @@ mod tests {
                 raw: 3
             }
         )));
-        assert_eq!(decoded.value.picture_aspect_ratio, PictureAspectRatio::NoData);
+        assert_eq!(
+            decoded.value.picture_aspect_ratio,
+            PictureAspectRatio::NoData
+        );
     }
 
     #[test]

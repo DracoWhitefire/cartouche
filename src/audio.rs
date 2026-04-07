@@ -485,11 +485,12 @@ mod tests {
     #[test]
     fn sample_freq_and_size_variants_round_trip() {
         for (sf, ss) in [
-            (SampleFrequency::Hz32000, SampleSize::ReferToStream),
+            (SampleFrequency::ReferToStream, SampleSize::ReferToStream),
+            (SampleFrequency::Hz32000, SampleSize::Bits16),
             (SampleFrequency::Hz44100, SampleSize::Bits20),
             (SampleFrequency::Hz48000, SampleSize::Bits24),
             (SampleFrequency::Hz88200, SampleSize::Bits16),
-            (SampleFrequency::Hz96000, SampleSize::Bits24),
+            (SampleFrequency::Hz96000, SampleSize::Bits16),
             (SampleFrequency::Hz176400, SampleSize::Bits16),
             (SampleFrequency::Hz192000, SampleSize::Bits16),
         ] {
@@ -507,7 +508,11 @@ mod tests {
 
     #[test]
     fn lfe_playback_levels_round_trip() {
-        for lsv in [LfePlaybackLevel::NoInfo, LfePlaybackLevel::Plus10Db, LfePlaybackLevel::Ref0Db] {
+        for lsv in [
+            LfePlaybackLevel::NoInfo,
+            LfePlaybackLevel::Plus10Db,
+            LfePlaybackLevel::Ref0Db,
+        ] {
             let frame = AudioInfoFrame {
                 lfe_playback_level: lsv,
                 ..default_frame()
