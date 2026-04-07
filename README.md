@@ -8,9 +8,10 @@
 
 Encoding and decoding for HDMI InfoFrames.
 
-cartouche encodes and decodes all five HDMI 2.1 InfoFrame types: AVI, Audio, HDR Static
-Metadata, HDMI Forum Vendor-Specific, and Dynamic HDR. It is a pure encoding/decoding
-library with no I/O and no allocation requirement.
+cartouche encodes and decodes HDMI 2.1 InfoFrames: AVI, Audio, HDR Static Metadata, and
+HDMI Forum Vendor-Specific frames are fully supported; Dynamic HDR fragment decoding and
+sequence assembly are implemented, with per-format metadata structs planned. It is a pure
+encoding/decoding library with no I/O and no allocation requirement.
 
 InfoFrames are the auxiliary metadata packets transmitted in the data island periods of an
 HDMI signal. The AVI InfoFrame signals color space and colorimetry; the HDR InfoFrames
@@ -18,14 +19,34 @@ carry mastering metadata and dynamic tone mapping parameters; the HDMI Forum VSI
 ALLM, VRR, and DSC state.
 
 ```rust
-use cartouche::avi::{AviInfoFrame, ColorSpace, Colorimetry};
+use cartouche::avi::{
+    AviInfoFrame, BarInfo, Colorimetry, ExtendedColorimetry, ItContentType,
+    NonUniformScaling, PictureAspectRatio, RgbQuantization, ScanInfo, YccQuantization,
+};
 use cartouche::encode::IntoPackets;
+use display_types::ColorFormat;
 
 // Encode
 let frame = AviInfoFrame {
-    color_space: ColorSpace::Rgb,
-    colorimetry: Colorimetry::None,
-    ..Default::default()
+    color_format: ColorFormat::Rgb444,
+    colorimetry: Colorimetry::NoData,
+    extended_colorimetry: ExtendedColorimetry::XvYCC601,
+    picture_aspect_ratio: PictureAspectRatio::SixteenByNine,
+    active_format_present: false,
+    active_format_aspect_ratio: 0,
+    bar_info: BarInfo::NotPresent,
+    scan_info: ScanInfo::NoData,
+    it_content: false,
+    it_content_type: ItContentType::Graphics,
+    rgb_quantization: RgbQuantization::Default,
+    ycc_quantization: YccQuantization::LimitedRange,
+    non_uniform_scaling: NonUniformScaling::None,
+    vic: 16,
+    pixel_repetition: 0,
+    top_bar: 0,
+    bottom_bar: 0,
+    left_bar: 0,
+    right_bar: 0,
 };
 for packet in frame.into_packets() {
     transmit(&packet);  // your integration layer
@@ -33,7 +54,7 @@ for packet in frame.into_packets() {
 
 // Decode
 let decoded = AviInfoFrame::decode(&packet)?;
-let frame = decoded.frame;
+let frame = decoded.value;
 for warning in decoded.iter_warnings() {
     eprintln!("warning: {:?}", warning);
 }
@@ -44,7 +65,7 @@ The top-level `decode` function dispatches on the type code and returns an `Info
 ```rust
 use cartouche::decode;
 
-match decode(&packet)?.frame {
+match decode(&packet)?.value {
     InfoFramePacket::Avi(f)          => { /* f: AviInfoFrame */ }
     InfoFramePacket::Audio(f)        => { /* f: AudioInfoFrame */ }
     InfoFramePacket::HdrStatic(f)    => { /* f: HdrStaticInfoFrame */ }
@@ -67,8 +88,10 @@ flowchart LR
 
 ## Why cartouche
 
-**Complete coverage.** All five HDMI 2.1 InfoFrame types are implemented. Every field
-specified in the standard is represented — no field is omitted because it seems niche.
+**Complete coverage.** All five HDMI 2.1 InfoFrame type codes are handled. The four
+traditional types (AVI, Audio, HDR Static, HDMI Forum VSI) are fully encoded and decoded;
+Dynamic HDR fragment decode and sequence assembly are implemented, with per-format metadata
+structs (HDR10+, SL-HDR) planned.
 
 **Typed fields, not raw bytes.** Color spaces are enums, not integers. VICs are validated
 values, not raw `u8`s. Raw bytes appear only in `Unknown` variants, where they are
