@@ -632,6 +632,7 @@ mod tests {
             (ScanInfo::NoData, Colorimetry::NoData),
             (ScanInfo::Overscanned, Colorimetry::Bt601),
             (ScanInfo::Underscanned, Colorimetry::Bt709),
+            (ScanInfo::NoData, Colorimetry::Extended),
         ] {
             let frame = AviInfoFrame {
                 scan_info: scan,
@@ -649,14 +650,9 @@ mod tests {
     fn bar_info_and_aspect_ratio_variants_round_trip() {
         for (bar, aspect) in [
             (BarInfo::NotPresent, PictureAspectRatio::NoData),
-            (
-                BarInfo::VerticalBarsPresent,
-                PictureAspectRatio::FourByThree,
-            ),
-            (
-                BarInfo::HorizontalBarsPresent,
-                PictureAspectRatio::SixteenByNine,
-            ),
+            (BarInfo::VerticalBarsPresent, PictureAspectRatio::FourByThree),
+            (BarInfo::HorizontalBarsPresent, PictureAspectRatio::SixteenByNine),
+            (BarInfo::BothPresent, PictureAspectRatio::SixteenByNine),
         ] {
             let frame = AviInfoFrame {
                 bar_info: bar,
@@ -708,6 +704,7 @@ mod tests {
         for cn in [
             ItContentType::Graphics,
             ItContentType::Photo,
+            ItContentType::Cinema,
             ItContentType::Game,
         ] {
             let frame = AviInfoFrame {
@@ -817,6 +814,24 @@ mod tests {
             decoded.value.ycc_quantization,
             YccQuantization::LimitedRange
         );
+    }
+
+    #[test]
+    fn unknown_picture_aspect_ratio_warns() {
+        // M[1:0] = 0b11 is reserved; decode should warn and fall back to NoData.
+        let mut packet = full_frame().into_packets().next().unwrap();
+        packet[5] = (packet[5] & !0x30) | 0x30; // set M[1:0] = 0b11
+        let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        packet[3] = packet[3].wrapping_sub(sum);
+        let decoded = AviInfoFrame::decode(&packet).unwrap();
+        assert!(decoded.iter_warnings().any(|w| matches!(
+            w,
+            AviWarning::UnknownEnumValue {
+                field: "picture_aspect_ratio",
+                raw: 3
+            }
+        )));
+        assert_eq!(decoded.value.picture_aspect_ratio, PictureAspectRatio::NoData);
     }
 
     #[test]
