@@ -25,8 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DynamicHdrInfoFrame::decode_sequence` assembles a complete packet sequence and returns
   `DynamicHdrInfoFrame::Unknown { format_id }` for all format identifiers. Per-format
   metadata structs (HDR10+, SL-HDR) and `IntoPackets` are planned for a future release.
-- **`IntoPackets` trait** — iterator-based encoding interface yielding `[u8; 31]`
-  wire packets; works for both single-packet and multi-packet frame types.
+- **`IntoPackets` trait** — encoding interface returning `Decoded<Iter, Warning>`,
+  pairing the packet iterator with any encode-time warnings; works for both
+  single-packet and multi-packet frame types.
 - **`InfoFrame` enum** — encode-path top-level enum covering all five InfoFrame types
   and an `Unknown` catch-all; implements `IntoPackets`.
 - **`InfoFramePacket` enum** — decode-path top-level type returned by the top-level

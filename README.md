@@ -48,7 +48,11 @@ let frame = AviInfoFrame {
     left_bar: 0,
     right_bar: 0,
 };
-for packet in frame.into_packets() {
+let encoded = frame.into_packets();
+for warning in encoded.iter_warnings() {
+    eprintln!("encode warning: {:?}", warning);
+}
+for packet in encoded.value {
     transmit(&packet);  // your integration layer
 }
 
@@ -56,7 +60,7 @@ for packet in frame.into_packets() {
 let decoded = AviInfoFrame::decode(&packet)?;
 let frame = decoded.value;
 for warning in decoded.iter_warnings() {
-    eprintln!("warning: {:?}", warning);
+    eprintln!("decode warning: {:?}", warning);
 }
 ```
 
@@ -93,12 +97,14 @@ traditional types (AVI, Audio, HDR Static, HDMI Forum VSI) are fully encoded and
 Dynamic HDR fragment decode and sequence assembly are implemented, with per-format metadata
 structs (HDR10+, SL-HDR) planned.
 
-**Typed fields, not raw bytes.** Color spaces are enums, not integers. VICs are validated
-values, not raw `u8`s. Raw bytes appear only in `Unknown` variants, where they are
-preserved exactly because the type is not understood.
+**Typed fields, not raw bytes.** Color spaces are enums, not integers. VICs are 7-bit
+wire values; out-of-range values produce an encode warning rather than being silently
+truncated. Raw bytes appear only in `Unknown` variants, where they are preserved exactly
+because the type is not understood.
 
-**Warnings without data loss.** Anomalous input (bad checksum, reserved field,
-out-of-spec value) produces a warning on the returned frame, not an error. The caller
+**Warnings without data loss.** Anomalous values (bad checksum, reserved field,
+out-of-spec value) produce a warning, not an error. On decode the warning is attached to
+the returned frame; on encode it is attached to the returned `Decoded`. The caller
 receives the data and the warning; nothing is silently discarded. Truncation is the
 only hard error.
 
@@ -107,7 +113,9 @@ designed for both single-packet and multi-packet (Dynamic HDR) frame types from 
 start. For the four traditional types the transmission loop is already uniform:
 
 ```rust
-for packet in frame.into_packets() {
+let encoded = frame.into_packets();
+// check encoded.iter_warnings()
+for packet in encoded.value {
     transmit(&packet);
 }
 ```

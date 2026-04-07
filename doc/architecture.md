@@ -112,19 +112,28 @@ All InfoFrame types implement an `IntoPackets` trait that yields an iterator of
 ```rust
 pub trait IntoPackets {
     type Iter: Iterator<Item = [u8; 31]>;
-    fn into_packets(self) -> Self::Iter;
+    type Warning;
+    fn into_packets(self) -> Decoded<Self::Iter, Self::Warning>;
+}
+```
+
+`into_packets` mirrors the decode path: it returns `Decoded<Iter, Warning>` so that
+encode-time anomalies (field values outside the spec range) are surfaced as warnings
+rather than silently discarded. The transmission loop:
+
+```rust
+let encoded = frame.into_packets();
+for warning in encoded.iter_warnings() {
+    // handle encode warnings
+}
+for packet in encoded.value {
+    transmit(&packet);
 }
 ```
 
 For traditional InfoFrame types, the iterator yields exactly one item. For Dynamic HDR,
-it yields as many 31-byte packets as the metadata requires. The integration layer's
-transmission loop is the same regardless of frame type:
-
-```rust
-for packet in frame.into_packets() {
-    transmit(&packet);
-}
-```
+it yields as many 31-byte packets as the metadata requires; the loop is the same either
+way.
 
 No allocation is required for encoding. The iterator is a state machine that owns the
 typed struct — `into_packets(self)` moves the frame into the iterator. The `Iter`
@@ -275,8 +284,9 @@ anomalies are warnings.
 
 Each InfoFrame type has its own warning enum — `AviWarning`, `AudioWarning`,
 `HdrStaticWarning`, `HdmiForumVsiWarning`, `DynamicHdrWarning`. This is the `W`
-parameter in `Result<Decoded<Self, W>, DecodeError>`. Per-frame enums allow callers that
-decode a specific type directly to exhaustively match without an `_ =>` arm.
+parameter in both `Result<Decoded<Self, W>, DecodeError>` (decode) and
+`Decoded<Self::Iter, W>` (encode). Per-frame enums allow callers that work with a
+specific type directly to exhaustively match without an `_ =>` arm.
 
 All per-frame warning enums share a common set of variants:
 
@@ -458,11 +468,13 @@ encoding or decoding behaviour.
   in the standard is represented. No field is omitted because it seems niche or unlikely
   to be needed. What is relevant to the caller is the caller's decision, not cartouche's.
 - **Typed fields, not raw bytes.** Every InfoFrame field is a named, typed Rust value.
-  Color spaces are enums, not integers. VICs are validated values, not raw `u8`s. Raw
+  Color spaces are enums, not integers. VICs are 7-bit wire values; out-of-range values
+  produce an encode warning rather than being silently truncated. Raw
   bytes appear only in `Unknown` variants, where they are preserved exactly because the
   type is not understood.
 - **Warnings without data loss.** Anomalous input (bad checksum, reserved field,
-  out-of-spec value) produces a warning on the returned frame, not an error. The caller
+  out-of-spec value) produces a warning, not an error. On decode the warning is attached
+  to the returned frame; on encode it is attached to the returned `Decoded`. The caller
   receives the data and the warning; nothing is silently discarded. Truncation is the
   only hard error.
 - **Checksum is a wire detail.** The checksum byte is computed from the rest of the
