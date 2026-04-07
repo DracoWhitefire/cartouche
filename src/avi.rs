@@ -172,7 +172,6 @@ pub enum ItContentType {
 /// - PB10–PB11: `left_bar` (little-endian)
 /// - PB12–PB13: `right_bar` (little-endian)
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub struct AviInfoFrame {
     // ---- PB1 ----
     /// Video color format (Y\[2:0\]).

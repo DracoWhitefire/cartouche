@@ -28,7 +28,6 @@ pub enum Eotf {
 /// Primary order follows CTA-861 / SMPTE ST 2086: green first, then blue,
 /// then red.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub struct StaticMetadataType1 {
     /// Mastering display green primary chromaticity (x, y) × 50 000.
     pub primaries_green: [u16; 2],
@@ -70,7 +69,6 @@ pub enum StaticMetadata {
 /// Carries the EOTF and the static HDR metadata for the content being
 /// transmitted. Required for HDR10 and HLG content.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub struct HdrStaticInfoFrame {
     /// Electro-optical transfer function (EOTF, PB1 bits 2–0).
     pub eotf: Eotf,

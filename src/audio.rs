@@ -111,7 +111,6 @@ pub enum LfePlaybackLevel {
 /// The `coding_ext` field is only meaningful when `coding_type` is
 /// [`AudioCodingType::Extension`]; in all other cases it should be `0`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub struct AudioInfoFrame {
     /// Audio coding type (CT, PB1 bits 6–3).
     pub coding_type: AudioCodingType,
