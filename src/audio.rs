@@ -160,10 +160,7 @@ impl AudioInfoFrame {
     pub fn decode(packet: &[u8; 31]) -> Result<Decoded<AudioInfoFrame, AudioWarning>, DecodeError> {
         let length = packet[2];
         if length > 27 {
-            return Err(DecodeError::Truncated {
-                claimed: length,
-                available: 27,
-            });
+            return Err(DecodeError::Truncated { claimed: length });
         }
 
         let mut decoded = Decoded::new(AudioInfoFrame {
@@ -413,10 +410,7 @@ mod tests {
         packet[2] = 28; // length > 27
         assert!(matches!(
             AudioInfoFrame::decode(&packet),
-            Err(crate::error::DecodeError::Truncated {
-                claimed: 28,
-                available: 27
-            })
+            Err(crate::error::DecodeError::Truncated { claimed: 28 })
         ));
     }
 

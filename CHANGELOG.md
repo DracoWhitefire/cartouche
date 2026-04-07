@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ReservedFieldNonZero`, and `UnknownEnumValue` variants.
 - **Checksum** — computed on encode, verified on decode; mismatch is a warning, not
   an error.
-- **`DecodeError`** — `Truncated { claimed, available }` is the only hard decode error.
+- **`DecodeError`** — `Truncated { claimed }` is the only hard decode error.
 - **`no_std` + `alloc` + `std` support** — all three build tiers are explicitly
   supported and verified in CI.
 - **`serde` feature** — derives `Serialize`/`Deserialize` on all public types.

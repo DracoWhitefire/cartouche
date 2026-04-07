@@ -16,11 +16,10 @@ pub enum DecodeError {
     /// A 31-byte packet can hold at most 27 payload bytes (bytes 4–30). If the header
     /// `length` field declares more than 27, the packet cannot be decoded.
     ///
-    /// `claimed` is the value of the `length` field; `available` is always 27.
+    /// `claimed` is the value of the `length` field. The available payload
+    /// capacity of a 31-byte HDMI packet is always 27 bytes (bytes 4–30).
     Truncated {
         /// The value declared in the packet header's `length` field.
         claimed: u8,
-        /// The number of payload bytes actually available in the packet (always 27).
-        available: u8,
     },
 }

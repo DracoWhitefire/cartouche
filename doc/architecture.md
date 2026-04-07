@@ -268,7 +268,7 @@ The `length` field in the packet header declares the number of payload bytes. Si
 input buffer is always exactly `[u8; 31]`, truncation is not a buffer-overrun check —
 it is a validity check on the `length` field itself: if `length > 27` (the maximum
 payload capacity of a 31-byte packet) the packet cannot be decoded. This is the one case
-that returns a hard `DecodeError::Truncated { claimed: u8, available: u8 }`. All other
+that returns a hard `DecodeError::Truncated { claimed: u8 }`. All other
 anomalies are warnings.
 
 ### Warning types

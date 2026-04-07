@@ -57,10 +57,7 @@ pub(crate) mod type_code {
 pub fn decode(packet: &[u8; 31]) -> Result<Decoded<InfoFramePacket, Warning>, DecodeError> {
     let length = packet[2];
     if length > 27 {
-        return Err(DecodeError::Truncated {
-            claimed: length,
-            available: 27,
-        });
+        return Err(DecodeError::Truncated { claimed: length });
     }
 
     let type_code = packet[0];
@@ -307,10 +304,7 @@ mod tests {
         packet[2] = 28; // > 27
         assert!(matches!(
             decode(&packet),
-            Err(DecodeError::Truncated {
-                claimed: 28,
-                available: 27
-            })
+            Err(DecodeError::Truncated { claimed: 28 })
         ));
     }
 

@@ -58,10 +58,7 @@ impl DynamicHdrInfoFrame {
         for packet in packets {
             let length = packet[2];
             if length > 27 {
-                return Err(DecodeError::Truncated {
-                    claimed: length,
-                    available: 27,
-                });
+                return Err(DecodeError::Truncated { claimed: length });
             }
 
             let total: u8 = packet.iter().fold(0u8, |acc, &b| acc.wrapping_add(b));
@@ -149,10 +146,7 @@ impl DynamicHdrFragment {
     ) -> Result<Decoded<DynamicHdrFragment, DynamicHdrWarning>, DecodeError> {
         let length = packet[2];
         if length > 27 {
-            return Err(DecodeError::Truncated {
-                claimed: length,
-                available: 27,
-            });
+            return Err(DecodeError::Truncated { claimed: length });
         }
 
         let mut decoded = Decoded::new(DynamicHdrFragment {
@@ -250,10 +244,7 @@ mod tests {
         packet[2] = 28; // > 27
         assert!(matches!(
             DynamicHdrFragment::decode(&packet),
-            Err(DecodeError::Truncated {
-                claimed: 28,
-                available: 27
-            })
+            Err(DecodeError::Truncated { claimed: 28 })
         ));
     }
 
@@ -321,10 +312,7 @@ mod tests {
         p0[2] = 28; // > 27
         assert!(matches!(
             DynamicHdrInfoFrame::decode_sequence(&[p0]),
-            Err(DecodeError::Truncated {
-                claimed: 28,
-                available: 27
-            })
+            Err(DecodeError::Truncated { claimed: 28 })
         ));
     }
 }
