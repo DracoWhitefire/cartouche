@@ -730,6 +730,7 @@ mod tests {
             ExtendedColorimetry::OpYCC601,
             ExtendedColorimetry::OpRgb,
             ExtendedColorimetry::Bt2020cYCC,
+            ExtendedColorimetry::Bt2020YCC,
             ExtendedColorimetry::AdditionalColorimetryExtension,
         ] {
             let frame = AviInfoFrame {
@@ -741,6 +742,81 @@ mod tests {
             let decoded = AviInfoFrame::decode(&packet).unwrap();
             assert_eq!(decoded.value.extended_colorimetry, ec);
         }
+    }
+
+    #[test]
+    fn unknown_scan_info_warns() {
+        // S = 0b11 is reserved; decode should warn and fall back to NoData.
+        let mut packet = full_frame().into_packets().next().unwrap();
+        packet[4] = (packet[4] & !0x03) | 0x03; // set S[1:0] = 0b11
+        let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        packet[3] = packet[3].wrapping_sub(sum);
+        let decoded = AviInfoFrame::decode(&packet).unwrap();
+        assert!(decoded.iter_warnings().any(|w| matches!(
+            w,
+            AviWarning::UnknownEnumValue {
+                field: "scan_info",
+                raw: 3
+            }
+        )));
+        assert_eq!(decoded.value.scan_info, ScanInfo::NoData);
+    }
+
+    #[test]
+    fn unknown_color_format_warns() {
+        // Y[2:0] = 0b101 (5) is not a defined ColorFormat.
+        let mut packet = full_frame().into_packets().next().unwrap();
+        packet[4] = (packet[4] & !0xE0) | (5u8 << 5);
+        let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        packet[3] = packet[3].wrapping_sub(sum);
+        let decoded = AviInfoFrame::decode(&packet).unwrap();
+        assert!(decoded.iter_warnings().any(|w| matches!(
+            w,
+            AviWarning::UnknownEnumValue {
+                field: "color_format",
+                raw: 5
+            }
+        )));
+        assert_eq!(decoded.value.color_format, ColorFormat::Rgb444);
+    }
+
+    #[test]
+    fn unknown_rgb_quantization_warns() {
+        // Q[1:0] = 0b11 is reserved.
+        let mut packet = full_frame().into_packets().next().unwrap();
+        packet[6] = (packet[6] & !0x0C) | 0x0C; // set Q[1:0] = 0b11
+        let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        packet[3] = packet[3].wrapping_sub(sum);
+        let decoded = AviInfoFrame::decode(&packet).unwrap();
+        assert!(decoded.iter_warnings().any(|w| matches!(
+            w,
+            AviWarning::UnknownEnumValue {
+                field: "rgb_quantization",
+                raw: 3
+            }
+        )));
+        assert_eq!(decoded.value.rgb_quantization, RgbQuantization::Default);
+    }
+
+    #[test]
+    fn unknown_ycc_quantization_warns() {
+        // YQ[1:0] = 0b10 is reserved.
+        let mut packet = full_frame().into_packets().next().unwrap();
+        packet[8] = (packet[8] & !0xC0) | 0x80; // set YQ[1:0] = 0b10
+        let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        packet[3] = packet[3].wrapping_sub(sum);
+        let decoded = AviInfoFrame::decode(&packet).unwrap();
+        assert!(decoded.iter_warnings().any(|w| matches!(
+            w,
+            AviWarning::UnknownEnumValue {
+                field: "ycc_quantization",
+                raw: 2
+            }
+        )));
+        assert_eq!(
+            decoded.value.ycc_quantization,
+            YccQuantization::LimitedRange
+        );
     }
 
     #[test]
