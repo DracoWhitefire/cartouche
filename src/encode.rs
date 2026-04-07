@@ -29,9 +29,9 @@ impl Iterator for SinglePacketIter {
 ///
 /// # Warnings
 ///
-/// Like the decode path, `into_packets` returns a [`Decoded`] that pairs the
+/// Like the decode path, `into_packets` returns a [`Decoded`](crate::decoded::Decoded) that pairs the
 /// packet iterator with any warnings produced during encoding. Callers should
-/// check [`Decoded::iter_warnings`] before transmitting packets.
+/// check [`Decoded::iter_warnings`](crate::decoded::Decoded::iter_warnings) before transmitting packets.
 ///
 /// # Example
 ///
@@ -52,7 +52,7 @@ pub trait IntoPackets {
     /// The warning type produced during encoding.
     type Warning;
 
-    /// Consume the frame and return a [`Decoded`] containing the packet
+    /// Consume the frame and return a [`Decoded`](crate::decoded::Decoded) containing the packet
     /// iterator and any encode-time warnings.
     fn into_packets(self) -> crate::decoded::Decoded<Self::Iter, Self::Warning>;
 }
