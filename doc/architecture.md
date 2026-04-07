@@ -218,10 +218,10 @@ sequence:
   sequence is complete when the sum of chunk lengths across all received fragments
   reaches this value.
 - `format_id: u8` — identifies the metadata format (HDR10+, SL-HDR, etc.).
-- `chunk: [u8; 29]` — the metadata bytes carried by this packet.
-- `chunk_len: u8` — number of valid bytes in `chunk`; always ≤ 29. The final packet in
-  a sequence may carry fewer than 29 bytes; `chunk[..chunk_len as usize]` is the
-  meaningful slice. All other packets carry exactly 29 bytes.
+- `chunk: [u8; 23]` — the metadata bytes carried by this packet.
+- `chunk_len: u8` — number of valid bytes in `chunk`; always ≤ 23. The final packet in
+  a sequence may carry fewer than 23 bytes; `chunk[..chunk_len as usize]` is the
+  meaningful slice. All other packets carry exactly 23 bytes.
 
 Once the caller has collected a complete sequence, it passes the packets to
 `DynamicHdrInfoFrame::decode_sequence(&[[u8; 31]])` to assemble the full frame.
@@ -416,21 +416,20 @@ across all packets.
 
 #### Encoding
 
-Encoding a `DynamicHdrInfoFrame` produces a sequence of `[u8; 31]` packets via
-`IntoPackets`. The iterator handles packet boundary alignment, sequence numbering, and the
-final partial-chunk packet automatically. No allocation required.
+`IntoPackets` for `DynamicHdrInfoFrame` is not yet implemented. It is planned once
+per-format structs (HDR10+, SL-HDR) are added; see the roadmap.
 
 #### Decoding
 
-Decoding requires a full sequence of packets. The caller is responsible for collecting the
-packets (the wire packet's sequence field indicates position; the byte count field indicates
-when the sequence is complete). Once the full sequence is available, it is passed to
-`DynamicHdrInfoFrame::decode_sequence(&[[u8; 31]])`, which assembles and parses the
-payload. No allocation is required in cartouche; the caller provides the buffer.
+`DynamicHdrFragment::decode` decodes a single 29-byte-payload packet into a
+`DynamicHdrFragment`, giving the caller the fields needed to accumulate a complete
+sequence. Once the caller has collected all packets,
+`DynamicHdrInfoFrame::decode_sequence(&[[u8; 31]])` is available to assemble the frame.
 
-The metadata format identifier selects the interpretation of the payload bytes. Unknown
-format identifiers decode to `DynamicHdrInfoFrame::Unknown { format_id: u8, payload: ...
-}` with the raw payload preserved.
+The current implementation of `decode_sequence` extracts the format identifier from the
+first packet and returns `DynamicHdrInfoFrame::Unknown { format_id }` for all format
+identifiers, preserving the type code without attempting to parse format-specific
+metadata. Per-format parsing (HDR10+, SL-HDR) is planned; see the roadmap.
 
 ---
 
@@ -478,8 +477,9 @@ encoding or decoding behaviour.
 - **No allocation.** All encoding and decoding is done without a heap. The integration
   layer may choose to collect packets into a `Vec`; cartouche does not need to.
 - **No unsafe code.** `#![forbid(unsafe_code)]`.
-- **Stable consumer types.** All public structs are `#[non_exhaustive]` for forward
-  compatibility.
+- **Stable enums.** All public enums are `#[non_exhaustive]` so that new variants can be
+  added without breaking existing `match` arms. Encode-path frame structs are not
+  `#[non_exhaustive]`; callers must be able to construct them by field.
 - **Full test coverage.** Every InfoFrame type has round-trip tests covering every field
   variant, every warning condition, and checksum behaviour. The coverage ratchet in CI
   enforces that coverage does not regress.
