@@ -1,6 +1,7 @@
 use crate::audio::AudioInfoFrame;
 use crate::avi::AviInfoFrame;
 use crate::decoded::Decoded;
+use crate::dynamic_hdr::DynamicHdrFragment;
 use crate::error::DecodeError;
 use crate::frame::InfoFramePacket;
 use crate::hdmi_forum_vsi::{HDMI_FORUM_OUI, HdmiForumVsi};
@@ -88,14 +89,8 @@ pub fn decode(packet: &[u8; 31]) -> Result<Decoded<InfoFramePacket, Warning>, De
                 }))
             }
         }
-        type_code::DYNAMIC_HDR => {
-            // TODO(phase3): DynamicHdrFragment::decode(packet)
-            Ok(Decoded::new(InfoFramePacket::Unknown {
-                type_code,
-                version,
-                payload,
-            }))
-        }
+        type_code::DYNAMIC_HDR => Ok(DynamicHdrFragment::decode(packet)?
+            .wrap(InfoFramePacket::DynamicHdrFragment, Warning::DynamicHdr)),
         _ => Ok(Decoded::new(InfoFramePacket::Unknown {
             type_code,
             version,
@@ -260,21 +255,31 @@ mod tests {
     }
 
     #[test]
-    fn decode_dynamic_hdr_is_unknown() {
+    fn decode_dynamic_hdr_fragment() {
         let mut packet = [0u8; 31];
         packet[0] = 0x20; // Dynamic HDR type code
         packet[1] = 0x01;
-        packet[2] = 4;
+        packet[2] = 7; // length = 4 overhead + 3 chunk bytes
+        packet[4] = 2; // seq_num
+        packet[5] = 0x1E; // total_bytes low
+        packet[6] = 0x00; // total_bytes high
+        packet[7] = 0x04; // format_id
+        packet[8] = 0xAA;
+        packet[9] = 0xBB;
+        packet[10] = 0xCC;
         let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
         packet[3] = packet[3].wrapping_sub(sum);
         let result = decode(&packet).unwrap();
-        assert!(matches!(
-            result.value,
-            InfoFramePacket::Unknown {
-                type_code: 0x20,
-                ..
-            }
-        ));
+        assert!(result.iter_warnings().next().is_none());
+        if let InfoFramePacket::DynamicHdrFragment(frag) = result.value {
+            assert_eq!(frag.seq_num, 2);
+            assert_eq!(frag.total_bytes, 0x001E);
+            assert_eq!(frag.format_id, 0x04);
+            assert_eq!(frag.chunk_len, 3);
+            assert_eq!(&frag.chunk[..3], &[0xAA, 0xBB, 0xCC]);
+        } else {
+            panic!("expected DynamicHdrFragment variant");
+        }
     }
 
     #[test]
@@ -376,6 +381,23 @@ mod tests {
             result
                 .iter_warnings()
                 .any(|w| matches!(w, Warning::HdmiForumVsi(_)))
+        );
+    }
+
+    #[test]
+    fn decode_dynamic_hdr_warning_lifted() {
+        let mut packet = [0u8; 31];
+        packet[0] = 0x20; // Dynamic HDR type code
+        packet[1] = 0x01;
+        packet[2] = 4; // minimum valid length
+        let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        packet[3] = packet[3].wrapping_sub(sum);
+        packet[3] = packet[3].wrapping_add(1); // corrupt checksum
+        let result = decode(&packet).unwrap();
+        assert!(
+            result
+                .iter_warnings()
+                .any(|w| matches!(w, Warning::DynamicHdr(_)))
         );
     }
 }
