@@ -5,14 +5,84 @@ use crate::warn::DynamicHdrWarning;
 /// A Dynamic HDR InfoFrame.
 ///
 /// Carries per-frame or per-scene dynamic tone mapping metadata for formats
-/// including HDR10+ and SL-HDR. Unlike all other InfoFrame types, the payload
-/// is variable length and spans multiple packets.
+/// including HDR10+ (ETSI TS 103 433) and SL-HDR. Unlike all other InfoFrame
+/// types, the payload is variable length and spans multiple packets.
 ///
-/// Fields and encode/decode support are added in a subsequent implementation
-/// phase.
+/// Use [`DynamicHdrFragment::decode`] to decode individual packets as they
+/// arrive. Once the full sequence is assembled, pass the raw packets to
+/// [`DynamicHdrInfoFrame::decode_sequence`] to obtain this type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct DynamicHdrInfoFrame {}
+pub enum DynamicHdrInfoFrame {
+    /// An unrecognised metadata format.
+    ///
+    /// Returned when the format identifier in the packet sequence is not
+    /// recognised by this version of `cartouche`. The raw payload is not
+    /// preserved; `format_id` identifies the format.
+    ///
+    /// Because the payload bytes are not retained, this variant cannot be
+    /// re-encoded via [`IntoPackets`](crate::encode::IntoPackets).
+    Unknown {
+        /// The metadata format identifier from the first packet in the sequence.
+        format_id: u8,
+    },
+}
+
+impl DynamicHdrInfoFrame {
+    /// Assemble a [`DynamicHdrInfoFrame`] from a complete sequence of wire packets.
+    ///
+    /// The caller is responsible for collecting the sequence. When the sum of
+    /// `chunk_len` values across all [`DynamicHdrFragment`]s received via the
+    /// top-level [`decode`](crate::decode) function equals `total_bytes`, the
+    /// sequence is complete and ready to pass here.
+    ///
+    /// The format identifier is read from the first packet in the sequence
+    /// (byte 7, PB3). Unknown format identifiers produce
+    /// [`DynamicHdrInfoFrame::Unknown`]; the raw payload bytes are not retained.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecodeError::Truncated`] if any packet in `packets` has
+    /// `packet[2] > 27`.
+    ///
+    /// # Warnings
+    ///
+    /// The returned [`Decoded`] may carry:
+    /// - [`DynamicHdrWarning::ChecksumMismatch`] — for any packet whose
+    ///   checksum does not verify.
+    pub fn decode_sequence(
+        packets: &[[u8; 31]],
+    ) -> Result<Decoded<DynamicHdrInfoFrame, DynamicHdrWarning>, DecodeError> {
+        let mut decoded = Decoded::new(DynamicHdrInfoFrame::Unknown { format_id: 0 });
+
+        for packet in packets {
+            let length = packet[2];
+            if length > 27 {
+                return Err(DecodeError::Truncated {
+                    claimed: length,
+                    available: 27,
+                });
+            }
+
+            let total: u8 = packet.iter().fold(0u8, |acc, &b| acc.wrapping_add(b));
+            if total != 0x00 {
+                let expected = crate::checksum::compute_checksum(packet[..30].try_into().unwrap());
+                decoded.push_warning(DynamicHdrWarning::ChecksumMismatch {
+                    expected,
+                    found: packet[3],
+                });
+            }
+        }
+
+        if let Some(first) = packets.first() {
+            // format_id lives at byte 7 (PB3) of every packet.
+            let format_id = first[7];
+            decoded.value = DynamicHdrInfoFrame::Unknown { format_id };
+        }
+
+        Ok(decoded)
+    }
+}
 
 /// A single packet's worth of Dynamic HDR metadata, as returned by the
 /// top-level [`decode`](crate::decode) function.
@@ -199,5 +269,62 @@ mod tests {
         let decoded = DynamicHdrFragment::decode(&packet).unwrap();
         assert!(decoded.iter_warnings().next().is_none());
         assert_eq!(decoded.value.chunk_len, 0);
+    }
+
+    // --- decode_sequence tests ---
+
+    #[test]
+    fn decode_sequence_single_packet_unknown_format() {
+        let packet = make_packet(0, 23, 0x04, &[0xAAu8; 23]);
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&[packet]).unwrap();
+        assert!(decoded.iter_warnings().next().is_none());
+        assert_eq!(
+            decoded.value,
+            DynamicHdrInfoFrame::Unknown { format_id: 0x04 }
+        );
+    }
+
+    #[test]
+    fn decode_sequence_multi_packet_format_id_from_first() {
+        let p0 = make_packet(0, 46, 0x04, &[0xAAu8; 23]);
+        let p1 = make_packet(1, 46, 0x04, &[0xBBu8; 23]);
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&[p0, p1]).unwrap();
+        assert!(decoded.iter_warnings().next().is_none());
+        assert_eq!(
+            decoded.value,
+            DynamicHdrInfoFrame::Unknown { format_id: 0x04 }
+        );
+    }
+
+    #[test]
+    fn decode_sequence_empty_yields_unknown_zero() {
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&[]).unwrap();
+        assert!(decoded.iter_warnings().next().is_none());
+        assert_eq!(decoded.value, DynamicHdrInfoFrame::Unknown { format_id: 0 });
+    }
+
+    #[test]
+    fn decode_sequence_checksum_mismatch_warning() {
+        let mut p0 = make_packet(0, 23, 0x04, &[0u8; 23]);
+        p0[3] = p0[3].wrapping_add(1); // corrupt checksum
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&[p0]).unwrap();
+        assert!(
+            decoded
+                .iter_warnings()
+                .any(|w| matches!(w, DynamicHdrWarning::ChecksumMismatch { .. }))
+        );
+    }
+
+    #[test]
+    fn decode_sequence_truncated_returns_error() {
+        let mut p0 = make_packet(0, 23, 0x04, &[0u8; 23]);
+        p0[2] = 28; // > 27
+        assert!(matches!(
+            DynamicHdrInfoFrame::decode_sequence(&[p0]),
+            Err(DecodeError::Truncated {
+                claimed: 28,
+                available: 27
+            })
+        ));
     }
 }

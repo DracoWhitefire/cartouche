@@ -88,7 +88,8 @@ pub enum InfoFramePacket {
 /// Iterator returned by [`IntoPackets`] for [`InfoFrame`].
 ///
 /// Yields a single 31-byte packet for all traditional InfoFrame types.
-/// The Dynamic HDR variant is not yet implemented (Phase 3) and yields no packets.
+/// [`DynamicHdrInfoFrame::Unknown`]
+/// yields no packets because the raw payload bytes are not retained.
 pub struct InfoFrameIter(Option<SinglePacketIter>);
 
 impl Iterator for InfoFrameIter {
@@ -244,7 +245,8 @@ mod tests {
 
     #[test]
     fn dynamic_hdr_variant_yields_no_packets() {
-        let frame = InfoFrame::DynamicHdr(DynamicHdrInfoFrame {});
+        // Unknown variants cannot be re-encoded — payload bytes are not retained.
+        let frame = InfoFrame::DynamicHdr(DynamicHdrInfoFrame::Unknown { format_id: 0x04 });
         assert!(frame.into_packets().next().is_none());
     }
 
