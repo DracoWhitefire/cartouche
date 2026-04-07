@@ -88,8 +88,8 @@ pub enum InfoFramePacket {
 /// Iterator returned by [`IntoPackets`] for [`InfoFrame`].
 ///
 /// Yields a single 31-byte packet for all traditional InfoFrame types.
-/// [`DynamicHdrInfoFrame::Unknown`]
-/// yields no packets because the raw payload bytes are not retained.
+/// [`InfoFrame::DynamicHdr`] currently yields no packets (Phase 3 encoding
+/// is not yet implemented).
 pub struct InfoFrameIter(Option<SinglePacketIter>);
 
 impl Iterator for InfoFrameIter {
