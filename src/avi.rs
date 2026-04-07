@@ -435,6 +435,8 @@ impl IntoPackets for AviInfoFrame {
             ColorFormat::YCbCr422 => 1,
             ColorFormat::YCbCr444 => 2,
             ColorFormat::YCbCr420 => 3,
+            // ColorFormat is #[non_exhaustive] from display-types; unknown future
+            // variants fall back to Rgb444 (Y=0), the safest default per CTA-861.
             _ => 0,
         };
         let b_raw: u8 = match self.bar_info {
