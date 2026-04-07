@@ -50,7 +50,9 @@ pub enum ChannelCount {
     ///
     /// The stored value is the actual number of channels (2–8). On the wire
     /// the CC field carries `count - 1`. Values outside 2–8 are clamped on
-    /// encode.
+    /// encode: `Count(0)` or `Count(1)` encode as CC = 0, which is
+    /// indistinguishable from [`ReferToStream`](Self::ReferToStream);
+    /// `Count(n)` for n > 8 encodes as CC = 7 (eight channels).
     Count(u8),
 }
 
