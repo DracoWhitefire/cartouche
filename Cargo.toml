@@ -2,5 +2,20 @@
 name = "cartouche"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+description = "Encoding and decoding for HDMI InfoFrames."
+readme = "README.md"
+license = "MPL-2.0"
+repository = "https://github.com/DracoWhitefire/cartouche"
+keywords = ["hdmi", "infoframe", "no-std", "display", "hardware"]
+categories = ["hardware-support", "embedded", "encoding", "parser-implementations"]
+
+[features]
+default = ["std"]
+std = ["alloc"]
+alloc = []
+serde = ["dep:serde", "display-types/serde"]
 
 [dependencies]
+display-types = { version = "0.3.1", default-features = false }
+serde = { version = "1.0", optional = true, features = ["derive"] }
