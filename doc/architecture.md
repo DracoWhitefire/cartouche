@@ -112,19 +112,28 @@ All InfoFrame types implement an `IntoPackets` trait that yields an iterator of
 ```rust
 pub trait IntoPackets {
     type Iter: Iterator<Item = [u8; 31]>;
-    fn into_packets(self) -> Self::Iter;
+    type Warning;
+    fn into_packets(self) -> Decoded<Self::Iter, Self::Warning>;
+}
+```
+
+`into_packets` mirrors the decode path: it returns `Decoded<Iter, Warning>` so that
+encode-time anomalies (field values outside the spec range) are surfaced as warnings
+rather than silently discarded. The transmission loop:
+
+```rust
+let encoded = frame.into_packets();
+for warning in encoded.iter_warnings() {
+    // handle encode warnings
+}
+for packet in encoded.value {
+    transmit(&packet);
 }
 ```
 
 For traditional InfoFrame types, the iterator yields exactly one item. For Dynamic HDR,
-it yields as many 31-byte packets as the metadata requires. The integration layer's
-transmission loop is the same regardless of frame type:
-
-```rust
-for packet in frame.into_packets() {
-    transmit(&packet);
-}
-```
+it yields as many 31-byte packets as the metadata requires; the loop is the same either
+way.
 
 No allocation is required for encoding. The iterator is a state machine that owns the
 typed struct — `into_packets(self)` moves the frame into the iterator. The `Iter`
@@ -218,10 +227,10 @@ sequence:
   sequence is complete when the sum of chunk lengths across all received fragments
   reaches this value.
 - `format_id: u8` — identifies the metadata format (HDR10+, SL-HDR, etc.).
-- `chunk: [u8; 29]` — the metadata bytes carried by this packet.
-- `chunk_len: u8` — number of valid bytes in `chunk`; always ≤ 29. The final packet in
-  a sequence may carry fewer than 29 bytes; `chunk[..chunk_len as usize]` is the
-  meaningful slice. All other packets carry exactly 29 bytes.
+- `chunk: [u8; 23]` — the metadata bytes carried by this packet.
+- `chunk_len: u8` — number of valid bytes in `chunk`; always ≤ 23. The final packet in
+  a sequence may carry fewer than 23 bytes; `chunk[..chunk_len as usize]` is the
+  meaningful slice. All other packets carry exactly 23 bytes.
 
 Once the caller has collected a complete sequence, it passes the packets to
 `DynamicHdrInfoFrame::decode_sequence(&[[u8; 31]])` to assemble the full frame.
@@ -268,15 +277,16 @@ The `length` field in the packet header declares the number of payload bytes. Si
 input buffer is always exactly `[u8; 31]`, truncation is not a buffer-overrun check —
 it is a validity check on the `length` field itself: if `length > 27` (the maximum
 payload capacity of a 31-byte packet) the packet cannot be decoded. This is the one case
-that returns a hard `DecodeError::Truncated { claimed: u8, available: u8 }`. All other
+that returns a hard `DecodeError::Truncated { claimed: u8 }`. All other
 anomalies are warnings.
 
 ### Warning types
 
 Each InfoFrame type has its own warning enum — `AviWarning`, `AudioWarning`,
 `HdrStaticWarning`, `HdmiForumVsiWarning`, `DynamicHdrWarning`. This is the `W`
-parameter in `Result<Decoded<Self, W>, DecodeError>`. Per-frame enums allow callers that
-decode a specific type directly to exhaustively match without an `_ =>` arm.
+parameter in both `Result<Decoded<Self, W>, DecodeError>` (decode) and
+`Decoded<Self::Iter, W>` (encode). Per-frame enums allow callers that work with a
+specific type directly to exhaustively match without an `_ =>` arm.
 
 All per-frame warning enums share a common set of variants:
 
@@ -416,21 +426,20 @@ across all packets.
 
 #### Encoding
 
-Encoding a `DynamicHdrInfoFrame` produces a sequence of `[u8; 31]` packets via
-`IntoPackets`. The iterator handles packet boundary alignment, sequence numbering, and the
-final partial-chunk packet automatically. No allocation required.
+`IntoPackets` for `DynamicHdrInfoFrame` is not yet implemented. It is planned once
+per-format structs (HDR10+, SL-HDR) are added; see the roadmap.
 
 #### Decoding
 
-Decoding requires a full sequence of packets. The caller is responsible for collecting the
-packets (the wire packet's sequence field indicates position; the byte count field indicates
-when the sequence is complete). Once the full sequence is available, it is passed to
-`DynamicHdrInfoFrame::decode_sequence(&[[u8; 31]])`, which assembles and parses the
-payload. No allocation is required in cartouche; the caller provides the buffer.
+`DynamicHdrFragment::decode` decodes a single 29-byte-payload packet into a
+`DynamicHdrFragment`, giving the caller the fields needed to accumulate a complete
+sequence. Once the caller has collected all packets,
+`DynamicHdrInfoFrame::decode_sequence(&[[u8; 31]])` is available to assemble the frame.
 
-The metadata format identifier selects the interpretation of the payload bytes. Unknown
-format identifiers decode to `DynamicHdrInfoFrame::Unknown { format_id: u8, payload: ...
-}` with the raw payload preserved.
+The current implementation of `decode_sequence` extracts the format identifier from the
+first packet and returns `DynamicHdrInfoFrame::Unknown { format_id }` for all format
+identifiers, preserving the type code without attempting to parse format-specific
+metadata. Per-format parsing (HDR10+, SL-HDR) is planned; see the roadmap.
 
 ---
 
@@ -459,11 +468,13 @@ encoding or decoding behaviour.
   in the standard is represented. No field is omitted because it seems niche or unlikely
   to be needed. What is relevant to the caller is the caller's decision, not cartouche's.
 - **Typed fields, not raw bytes.** Every InfoFrame field is a named, typed Rust value.
-  Color spaces are enums, not integers. VICs are validated values, not raw `u8`s. Raw
+  Color spaces are enums, not integers. VICs are 7-bit wire values; out-of-range values
+  produce an encode warning rather than being silently truncated. Raw
   bytes appear only in `Unknown` variants, where they are preserved exactly because the
   type is not understood.
 - **Warnings without data loss.** Anomalous input (bad checksum, reserved field,
-  out-of-spec value) produces a warning on the returned frame, not an error. The caller
+  out-of-spec value) produces a warning, not an error. On decode the warning is attached
+  to the returned frame; on encode it is attached to the returned `Decoded`. The caller
   receives the data and the warning; nothing is silently discarded. Truncation is the
   only hard error.
 - **Checksum is a wire detail.** The checksum byte is computed from the rest of the
@@ -478,8 +489,17 @@ encoding or decoding behaviour.
 - **No allocation.** All encoding and decoding is done without a heap. The integration
   layer may choose to collect packets into a `Vec`; cartouche does not need to.
 - **No unsafe code.** `#![forbid(unsafe_code)]`.
-- **Stable consumer types.** All public structs are `#[non_exhaustive]` for forward
-  compatibility.
+- **Stable enums.** All public enums are `#[non_exhaustive]` so that new variants can be
+  added without breaking existing `match` arms. Encode-path frame structs are not
+  `#[non_exhaustive]`; callers must be able to construct them by field.
+- **Full test coverage.** Every InfoFrame type has round-trip tests covering every field
+  variant, every warning condition, and checksum behaviour. The coverage ratchet in CI
+  enforces that coverage does not regress.
+- **Fuzz-tested decode paths.** The decode path accepts arbitrary bytes and must never
+  panic. Fuzz targets verify two invariants: any 31-byte input either decodes
+  successfully (possibly with warnings) or returns `DecodeError::Truncated` — no other
+  outcome is acceptable; and encode followed by decode is identity for well-formed
+  frames.
 
 ---
 
@@ -500,6 +520,13 @@ Before any InfoFrame logic:
 - `CODE_OF_CONDUCT.md` and `CONTRIBUTING.md`, matching the sibling crates.
 - `.github/workflows/ci.yml`: fmt check, clippy (`-D warnings`), docs
   (`-D missing_docs`), test, no_std build check, alloc-only build check.
+- `.github/workflows/fuzz.yml`: matrix over fuzz targets; 60-second smoke run on PRs
+  and pushes, 1-hour deep run on weekly schedule and manual trigger; crash artifacts
+  uploaded on failure. After each deep run, each matrix job uploads its minimised corpus
+  as a workflow artifact; a final `needs: [fuzz]` job downloads all corpora, commits any
+  changes, and opens a `ci/fuzz-corpus` PR if the corpus changed — one PR per deep run
+  covering all targets, following the same `ci/` branch convention as the coverage
+  ratchet.
 - `.github/workflows/audit.yml`: `rustsec/audit-check` on Cargo.toml / Cargo.lock
   changes.
 - `.github/workflows/publish.yml`: tag-triggered publish gated to commits reachable
@@ -573,6 +600,8 @@ Order of implementation (roughly increasing complexity):
 
 - `doc/testing.md`: testing strategy, round-trip property testing approach, how to write
   tests against the simulated decode path.
+- Fuzz targets (`fuzz/fuzz_targets/`): one target per InfoFrame type exercising the
+  no-panic and round-trip invariants. Run via `cargo fuzz`.
 - Simulation example (`examples/roundtrip` or similar): construct one of each InfoFrame
   type, encode to packets, decode from packets, assert field equality.
 - `doc/roadmap.md`: what is released, what is planned.

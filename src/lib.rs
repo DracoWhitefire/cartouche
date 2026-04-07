@@ -1,14 +1,56 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! Encoding and decoding for HDMI InfoFrames.
+//!
+//! `cartouche` encodes and decodes the five HDMI 2.1 InfoFrame types: AVI, Audio,
+//! HDR Static Metadata, HDMI Forum Vendor-Specific, and Dynamic HDR. It is a pure
+//! encoding/decoding library with no I/O and no allocation requirement.
+//!
+//! # Features
+//!
+//! - `std` (default, implies `alloc`): enables `std` support. `Decoded<T, W>` uses
+//!   `Vec<W>` for warning storage.
+//! - `alloc`: enables `alloc` support without `std`. `Decoded<T, W>` uses `Vec<W>`.
+//! - `serde`: derives `Serialize` and `Deserialize` on all public types.
+//!
+//! Without `alloc` or `std`, warning storage falls back to a fixed `[Option<W>; 8]`
+//! array. No other behaviour changes.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#![no_std]
+#![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+#[cfg(any(feature = "alloc", feature = "std"))]
+extern crate alloc;
+
+#[cfg(feature = "std")]
+extern crate std;
+
+/// The [`IntoPackets`](encode::IntoPackets) encoding trait.
+pub mod encode;
+
+mod checksum;
+
+/// The [`DecodeError`](error::DecodeError) type.
+pub mod error;
+
+/// Per-frame warning enums and the unified [`Warning`](warn::Warning) wrapper.
+pub mod warn;
+
+/// The [`Decoded<T, W>`](decoded::Decoded) type returned by all decode paths.
+pub mod decoded;
+
+/// The [`AudioInfoFrame`](audio::AudioInfoFrame) type.
+pub mod audio;
+/// The [`AviInfoFrame`](avi::AviInfoFrame) type.
+pub mod avi;
+/// The [`DynamicHdrInfoFrame`](dynamic_hdr::DynamicHdrInfoFrame) and [`DynamicHdrFragment`](dynamic_hdr::DynamicHdrFragment) types.
+pub mod dynamic_hdr;
+/// The [`HdmiForumVsi`](hdmi_forum_vsi::HdmiForumVsi) type.
+pub mod hdmi_forum_vsi;
+/// The [`HdrStaticInfoFrame`](hdr_static::HdrStaticInfoFrame) type.
+pub mod hdr_static;
+
+/// The [`InfoFrame`](frame::InfoFrame) and [`InfoFramePacket`](frame::InfoFramePacket) enums.
+pub mod frame;
+
+mod decode;
+pub use decode::decode;

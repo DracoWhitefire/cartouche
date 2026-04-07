@@ -1,0 +1,50 @@
+[package]
+name = "cartouche-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.cartouche]
+path = ".."
+features = ["std"]
+
+[[bin]]
+name = "avi"
+path = "fuzz_targets/avi.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "audio"
+path = "fuzz_targets/audio.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "hdr_static"
+path = "fuzz_targets/hdr_static.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "hdmi_forum_vsi"
+path = "fuzz_targets/hdmi_forum_vsi.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dynamic_hdr"
+path = "fuzz_targets/dynamic_hdr.rs"
+test = false
+doc = false
+bench = false
