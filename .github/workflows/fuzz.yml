@@ -1,0 +1,109 @@
+name: Fuzz
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: '0 2 * * 6'  # weekly, Saturday 02:00 UTC
+  workflow_dispatch:       # allow manual trigger
+
+env:
+  CARGO_TERM_COLOR: always
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  fuzz:
+    name: Fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [avi, audio, hdr_static, hdmi_forum_vsi, dynamic_hdr]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Restore corpus cache
+        uses: actions/cache@v4
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.sha }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+
+      - name: Fuzz (smoke, 60 s) — PRs and pushes
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        run: cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=60
+
+      - name: Fuzz (deep, 1 h) — scheduled and manual
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=3600
+
+      - name: Minimise corpus
+        if: success() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        run: cargo +nightly fuzz cmin ${{ matrix.target }}
+
+      - name: Upload corpus artifact
+        if: success() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-corpus-${{ matrix.target }}
+          path: fuzz/corpus/${{ matrix.target }}/
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}/
+
+  update-corpus:
+    name: Update corpus
+    needs: [fuzz]
+    if: success() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all corpus artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fuzz-corpus-*
+          path: fuzz/corpus/
+          merge-multiple: false
+
+      - name: Flatten artifact subdirectories
+        run: |
+          for target in avi audio hdr_static hdmi_forum_vsi dynamic_hdr; do
+            src="fuzz/corpus/fuzz-corpus-${target}"
+            dst="fuzz/corpus/${target}"
+            if [ -d "$src" ]; then
+              mkdir -p "$dst"
+              cp -r "$src/." "$dst/"
+              rm -rf "$src"
+            fi
+          done
+
+      - name: Open PR if corpus changed
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ci/fuzz-corpus
+          commit-message: "ci: update fuzz corpus after deep run"
+          title: "ci: update fuzz corpus after deep run"
+          body: |
+            Minimised corpus from the latest deep fuzz run. Covers all five targets:
+            `avi`, `audio`, `hdr_static`, `hdmi_forum_vsi`, `dynamic_hdr`.
+
+            *Opened automatically by the fuzz CI job.*
+          add-paths: fuzz/corpus/
