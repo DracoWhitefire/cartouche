@@ -529,7 +529,10 @@ impl IntoPackets for AviInfoFrame {
 
         let mut result = crate::decoded::Decoded::new(SinglePacketIter::new(packet));
         if vic > 127 {
-            result.push_warning(AviWarning::UnknownEnumValue { field: "vic", raw: vic });
+            result.push_warning(AviWarning::UnknownEnumValue {
+                field: "vic",
+                raw: vic,
+            });
         }
         result
     }
@@ -855,7 +858,10 @@ mod tests {
         let mut encoded = frame.into_packets();
         assert!(encoded.iter_warnings().any(|w| matches!(
             w,
-            AviWarning::UnknownEnumValue { field: "vic", raw: 200 }
+            AviWarning::UnknownEnumValue {
+                field: "vic",
+                raw: 200
+            }
         )));
         // Wire value is 200 & 0x7F = 72.
         let packet = encoded.value.next().unwrap();
