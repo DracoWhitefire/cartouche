@@ -287,8 +287,9 @@ impl AudioInfoFrame {
 
 impl IntoPackets for AudioInfoFrame {
     type Iter = SinglePacketIter;
+    type Warning = AudioWarning;
 
-    fn into_packets(self) -> SinglePacketIter {
+    fn into_packets(self) -> crate::decoded::Decoded<SinglePacketIter, AudioWarning> {
         let ct: u8 = match self.coding_type {
             AudioCodingType::ReferToStream => 0,
             AudioCodingType::Lpcm => 1,
@@ -358,7 +359,7 @@ impl IntoPackets for AudioInfoFrame {
         packet[3] = checksum;
         packet[4..].copy_from_slice(&hp[3..]); // PB1..PB27
 
-        SinglePacketIter::new(packet)
+        crate::decoded::Decoded::new(SinglePacketIter::new(packet))
     }
 }
 
@@ -383,7 +384,7 @@ mod tests {
     #[test]
     fn round_trip() {
         let frame = default_frame();
-        let packet = frame.clone().into_packets().next().unwrap();
+        let packet = frame.clone().into_packets().value.next().unwrap();
         let decoded = AudioInfoFrame::decode(&packet).unwrap();
         assert!(decoded.iter_warnings().next().is_none());
         assert_eq!(decoded.value, frame);
@@ -391,7 +392,7 @@ mod tests {
 
     #[test]
     fn checksum_mismatch_warning() {
-        let mut packet = default_frame().into_packets().next().unwrap();
+        let mut packet = default_frame().into_packets().value.next().unwrap();
         packet[3] = packet[3].wrapping_add(1); // corrupt the checksum byte
         let decoded = AudioInfoFrame::decode(&packet).unwrap();
         let warnings: alloc::vec::Vec<_> = decoded.iter_warnings().collect();
@@ -406,7 +407,7 @@ mod tests {
 
     #[test]
     fn truncated_length_is_error() {
-        let mut packet = default_frame().into_packets().next().unwrap();
+        let mut packet = default_frame().into_packets().value.next().unwrap();
         packet[2] = 28; // length > 27
         assert!(matches!(
             AudioInfoFrame::decode(&packet),
@@ -416,7 +417,7 @@ mod tests {
 
     #[test]
     fn reserved_bit_warning() {
-        let mut packet = default_frame().into_packets().next().unwrap();
+        let mut packet = default_frame().into_packets().value.next().unwrap();
         packet[4] |= 0x80; // set reserved bit 7 of PB1
         // Recompute checksum to isolate the reserved-bit warning.
         let sum: u8 = packet[..31].iter().fold(0u8, |a, &b| a.wrapping_add(b));
@@ -431,7 +432,7 @@ mod tests {
 
     #[test]
     fn unknown_lfe_playback_level_warns_and_falls_back() {
-        let mut packet = default_frame().into_packets().next().unwrap();
+        let mut packet = default_frame().into_packets().value.next().unwrap();
         // LSV occupies PB5 bits [6:3]; set value 0x0F (15) which is out of spec.
         packet[8] = (packet[8] & 0x87) | (0x0F << 3);
         let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
@@ -469,7 +470,7 @@ mod tests {
                 coding_type: ct,
                 ..default_frame()
             };
-            let packet = frame.clone().into_packets().next().unwrap();
+            let packet = frame.clone().into_packets().value.next().unwrap();
             let decoded = AudioInfoFrame::decode(&packet).unwrap();
             assert_eq!(decoded.value.coding_type, ct);
         }
@@ -492,7 +493,7 @@ mod tests {
                 sample_size: ss,
                 ..default_frame()
             };
-            let packet = frame.clone().into_packets().next().unwrap();
+            let packet = frame.clone().into_packets().value.next().unwrap();
             let decoded = AudioInfoFrame::decode(&packet).unwrap();
             assert_eq!(decoded.value.sample_freq, sf);
             assert_eq!(decoded.value.sample_size, ss);
@@ -510,7 +511,7 @@ mod tests {
                 lfe_playback_level: lsv,
                 ..default_frame()
             };
-            let packet = frame.clone().into_packets().next().unwrap();
+            let packet = frame.clone().into_packets().value.next().unwrap();
             let decoded = AudioInfoFrame::decode(&packet).unwrap();
             assert_eq!(decoded.value.lfe_playback_level, lsv);
         }
@@ -518,7 +519,7 @@ mod tests {
 
     #[test]
     fn reserved_pb2_bits_warning() {
-        let mut packet = default_frame().into_packets().next().unwrap();
+        let mut packet = default_frame().into_packets().value.next().unwrap();
         packet[5] |= 0x80; // set reserved bit 7 of PB2
         let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
         packet[3] = packet[3].wrapping_sub(sum);
@@ -532,7 +533,7 @@ mod tests {
 
     #[test]
     fn reserved_pb3_bits_warning() {
-        let mut packet = default_frame().into_packets().next().unwrap();
+        let mut packet = default_frame().into_packets().value.next().unwrap();
         packet[6] |= 0x20; // set reserved bit 5 of PB3
         let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
         packet[3] = packet[3].wrapping_sub(sum);
@@ -546,7 +547,7 @@ mod tests {
 
     #[test]
     fn reserved_pb5_bits_warning() {
-        let mut packet = default_frame().into_packets().next().unwrap();
+        let mut packet = default_frame().into_packets().value.next().unwrap();
         packet[8] |= 0x01; // set reserved bit 0 of PB5
         let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
         packet[3] = packet[3].wrapping_sub(sum);
@@ -570,7 +571,7 @@ mod tests {
             lfe_playback_level: LfePlaybackLevel::NoInfo,
             downmix_inhibit: false,
         };
-        let packet = frame.clone().into_packets().next().unwrap();
+        let packet = frame.clone().into_packets().value.next().unwrap();
         let decoded = AudioInfoFrame::decode(&packet).unwrap();
         assert!(decoded.iter_warnings().next().is_none());
         assert_eq!(decoded.value, frame);

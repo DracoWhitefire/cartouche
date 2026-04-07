@@ -1,9 +1,11 @@
 use crate::audio::AudioInfoFrame;
 use crate::avi::AviInfoFrame;
+use crate::decoded::Decoded;
 use crate::dynamic_hdr::{DynamicHdrFragment, DynamicHdrInfoFrame};
 use crate::encode::{IntoPackets, SinglePacketIter};
 use crate::hdmi_forum_vsi::HdmiForumVsi;
 use crate::hdr_static::HdrStaticInfoFrame;
+use crate::warn::Warning;
 
 /// An InfoFrame ready for encoding.
 ///
@@ -102,14 +104,23 @@ impl Iterator for InfoFrameIter {
 
 impl IntoPackets for InfoFrame {
     type Iter = InfoFrameIter;
+    type Warning = Warning;
 
-    fn into_packets(self) -> InfoFrameIter {
-        let iter = match self {
-            InfoFrame::Avi(f) => Some(f.into_packets()),
-            InfoFrame::Audio(f) => Some(f.into_packets()),
-            InfoFrame::HdrStatic(f) => Some(f.into_packets()),
-            InfoFrame::HdmiForumVsi(f) => Some(f.into_packets()),
-            InfoFrame::DynamicHdr(_) => None, // Phase 3
+    fn into_packets(self) -> Decoded<InfoFrameIter, Warning> {
+        match self {
+            InfoFrame::Avi(f) => f
+                .into_packets()
+                .wrap(|iter| InfoFrameIter(Some(iter)), Warning::Avi),
+            InfoFrame::Audio(f) => f
+                .into_packets()
+                .wrap(|iter| InfoFrameIter(Some(iter)), Warning::Audio),
+            InfoFrame::HdrStatic(f) => f
+                .into_packets()
+                .wrap(|iter| InfoFrameIter(Some(iter)), Warning::HdrStatic),
+            InfoFrame::HdmiForumVsi(f) => f
+                .into_packets()
+                .wrap(|iter| InfoFrameIter(Some(iter)), Warning::HdmiForumVsi),
+            InfoFrame::DynamicHdr(_) => Decoded::new(InfoFrameIter(None)), // Phase 3
             InfoFrame::Unknown {
                 type_code,
                 version,
@@ -125,10 +136,9 @@ impl IntoPackets for InfoFrame {
                 packet[..3].copy_from_slice(&hp[..3]);
                 packet[3] = checksum;
                 packet[4..].copy_from_slice(&hp[3..]);
-                Some(SinglePacketIter::new(packet))
+                Decoded::new(InfoFrameIter(Some(SinglePacketIter::new(packet))))
             }
-        };
-        InfoFrameIter(iter)
+        }
     }
 }
 
@@ -172,7 +182,7 @@ mod tests {
             left_bar: 0,
             right_bar: 0,
         });
-        let mut iter = frame.into_packets();
+        let mut iter = frame.into_packets().value;
         let packet = iter.next().expect("expected one packet");
         assert_eq!(packet[0], 0x82); // AVI type code
         assert!(iter.next().is_none());
@@ -190,7 +200,7 @@ mod tests {
             lfe_playback_level: LfePlaybackLevel::NoInfo,
             downmix_inhibit: false,
         });
-        let mut iter = frame.into_packets();
+        let mut iter = frame.into_packets().value;
         let packet = iter.next().expect("expected one packet");
         assert_eq!(packet[0], 0x84); // Audio type code
         assert!(iter.next().is_none());
@@ -211,7 +221,7 @@ mod tests {
                 max_fall: 400,
             }),
         });
-        let mut iter = frame.into_packets();
+        let mut iter = frame.into_packets().value;
         let packet = iter.next().expect("expected one packet");
         assert_eq!(packet[0], 0x87); // HDR Static type code
         assert!(iter.next().is_none());
@@ -237,7 +247,7 @@ mod tests {
             dsc_10bpc: false,
             dsc_12bpc: false,
         });
-        let mut iter = frame.into_packets();
+        let mut iter = frame.into_packets().value;
         let packet = iter.next().expect("expected one packet");
         assert_eq!(packet[0], 0x81); // VSIF type code
         assert!(iter.next().is_none());
@@ -247,7 +257,7 @@ mod tests {
     fn dynamic_hdr_variant_yields_no_packets() {
         // Unknown variants cannot be re-encoded — payload bytes are not retained.
         let frame = InfoFrame::DynamicHdr(DynamicHdrInfoFrame::Unknown { format_id: 0x04 });
-        assert!(frame.into_packets().next().is_none());
+        assert!(frame.into_packets().value.next().is_none());
     }
 
     #[test]
@@ -260,7 +270,7 @@ mod tests {
             version: 0x02,
             payload,
         };
-        let mut iter = frame.into_packets();
+        let mut iter = frame.into_packets().value;
         let packet = iter.next().expect("expected one packet");
         assert_eq!(packet[0], 0xFE); // type code
         assert_eq!(packet[1], 0x02); // version
@@ -277,7 +287,7 @@ mod tests {
             version: 0x01,
             payload: [0u8; 27],
         };
-        let packet = frame.into_packets().next().unwrap();
+        let packet = frame.into_packets().value.next().unwrap();
         let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
         assert_eq!(sum, 0, "checksum must make all-bytes sum equal 0");
     }

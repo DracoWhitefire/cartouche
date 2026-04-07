@@ -190,8 +190,9 @@ impl HdrStaticInfoFrame {
 
 impl IntoPackets for HdrStaticInfoFrame {
     type Iter = SinglePacketIter;
+    type Warning = HdrStaticWarning;
 
-    fn into_packets(self) -> SinglePacketIter {
+    fn into_packets(self) -> crate::decoded::Decoded<SinglePacketIter, HdrStaticWarning> {
         let eotf_raw: u8 = match self.eotf {
             Eotf::TraditionalGammaSdr => 0,
             Eotf::TraditionalGammaHdr => 1,
@@ -246,7 +247,7 @@ impl IntoPackets for HdrStaticInfoFrame {
         packet[3] = checksum;
         packet[4..].copy_from_slice(&hp[3..]);
 
-        SinglePacketIter::new(packet)
+        crate::decoded::Decoded::new(SinglePacketIter::new(packet))
     }
 }
 
@@ -274,7 +275,7 @@ mod tests {
     #[test]
     fn round_trip() {
         let frame = type1_frame();
-        let packet = frame.clone().into_packets().next().unwrap();
+        let packet = frame.clone().into_packets().value.next().unwrap();
         let decoded = HdrStaticInfoFrame::decode(&packet).unwrap();
         assert!(decoded.iter_warnings().next().is_none());
         assert_eq!(decoded.value, frame);
@@ -282,7 +283,7 @@ mod tests {
 
     #[test]
     fn checksum_mismatch_warning() {
-        let mut packet = type1_frame().into_packets().next().unwrap();
+        let mut packet = type1_frame().into_packets().value.next().unwrap();
         packet[3] = packet[3].wrapping_add(1);
         let decoded = HdrStaticInfoFrame::decode(&packet).unwrap();
         assert!(
@@ -295,7 +296,7 @@ mod tests {
 
     #[test]
     fn truncated_length_is_error() {
-        let mut packet = type1_frame().into_packets().next().unwrap();
+        let mut packet = type1_frame().into_packets().value.next().unwrap();
         packet[2] = 28;
         assert!(matches!(
             HdrStaticInfoFrame::decode(&packet),
@@ -305,7 +306,7 @@ mod tests {
 
     #[test]
     fn unknown_eotf_warns_and_falls_back() {
-        let mut packet = type1_frame().into_packets().next().unwrap();
+        let mut packet = type1_frame().into_packets().value.next().unwrap();
         packet[4] = (packet[4] & !0x07) | 0x07; // set EOTF to 7 (reserved)
         let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
         packet[3] = packet[3].wrapping_sub(sum);
@@ -331,7 +332,7 @@ mod tests {
                 eotf,
                 ..type1_frame()
             };
-            let packet = frame.clone().into_packets().next().unwrap();
+            let packet = frame.clone().into_packets().value.next().unwrap();
             let decoded = HdrStaticInfoFrame::decode(&packet).unwrap();
             assert!(decoded.iter_warnings().next().is_none());
             assert_eq!(decoded.value.eotf, eotf);
@@ -350,7 +351,7 @@ mod tests {
                 data,
             },
         };
-        let packet = frame.clone().into_packets().next().unwrap();
+        let packet = frame.clone().into_packets().value.next().unwrap();
         let decoded = HdrStaticInfoFrame::decode(&packet).unwrap();
         assert!(decoded.iter_warnings().any(|w| matches!(
             w,
@@ -374,7 +375,7 @@ mod tests {
 
     #[test]
     fn reserved_pb1_bits_warning() {
-        let mut packet = type1_frame().into_packets().next().unwrap();
+        let mut packet = type1_frame().into_packets().value.next().unwrap();
         packet[4] |= 0x40; // set reserved bit 6 of PB1
         let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
         packet[3] = packet[3].wrapping_sub(sum);
@@ -387,7 +388,7 @@ mod tests {
 
     #[test]
     fn unknown_descriptor_id_warns() {
-        let mut packet = type1_frame().into_packets().next().unwrap();
+        let mut packet = type1_frame().into_packets().value.next().unwrap();
         packet[4] = (packet[4] & !0x38) | (0x05 << 3); // set descriptor_id to 5
         let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
         packet[3] = packet[3].wrapping_sub(sum);

@@ -420,8 +420,10 @@ impl AviInfoFrame {
 
 impl IntoPackets for AviInfoFrame {
     type Iter = SinglePacketIter;
+    type Warning = AviWarning;
 
-    fn into_packets(self) -> SinglePacketIter {
+    fn into_packets(self) -> crate::decoded::Decoded<SinglePacketIter, AviWarning> {
+        let vic = self.vic;
         let mut hp = [0u8; 30];
         hp[0] = 0x82; // type code (AVI)
         hp[1] = 0x02; // version
@@ -523,7 +525,11 @@ impl IntoPackets for AviInfoFrame {
         packet[3] = checksum;
         packet[4..].copy_from_slice(&hp[3..]);
 
-        SinglePacketIter::new(packet)
+        let mut result = crate::decoded::Decoded::new(SinglePacketIter::new(packet));
+        if vic > 127 {
+            result.push_warning(AviWarning::UnknownEnumValue { field: "vic", raw: vic });
+        }
+        result
     }
 }
 
@@ -559,7 +565,7 @@ mod tests {
     #[test]
     fn round_trip() {
         let frame = full_frame();
-        let packet = frame.clone().into_packets().next().unwrap();
+        let packet = frame.clone().into_packets().value.next().unwrap();
         let decoded = AviInfoFrame::decode(&packet).unwrap();
         assert!(decoded.iter_warnings().next().is_none());
         assert_eq!(decoded.value, frame);
@@ -567,7 +573,7 @@ mod tests {
 
     #[test]
     fn checksum_mismatch_warning() {
-        let mut packet = full_frame().into_packets().next().unwrap();
+        let mut packet = full_frame().into_packets().value.next().unwrap();
         packet[3] = packet[3].wrapping_add(1);
         let decoded = AviInfoFrame::decode(&packet).unwrap();
         assert!(
@@ -580,7 +586,7 @@ mod tests {
 
     #[test]
     fn truncated_length_is_error() {
-        let mut packet = full_frame().into_packets().next().unwrap();
+        let mut packet = full_frame().into_packets().value.next().unwrap();
         packet[2] = 28;
         assert!(matches!(
             AviInfoFrame::decode(&packet),
@@ -590,7 +596,7 @@ mod tests {
 
     #[test]
     fn reserved_bit_warning() {
-        let mut packet = full_frame().into_packets().next().unwrap();
+        let mut packet = full_frame().into_packets().value.next().unwrap();
         packet[7] |= 0x80; // set reserved bit 7 of PB4
         let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
         packet[3] = packet[3].wrapping_sub(sum);
@@ -613,7 +619,7 @@ mod tests {
                 color_format: fmt,
                 ..full_frame()
             };
-            let packet = frame.clone().into_packets().next().unwrap();
+            let packet = frame.clone().into_packets().value.next().unwrap();
             let decoded = AviInfoFrame::decode(&packet).unwrap();
             assert_eq!(decoded.value.color_format, fmt);
         }
@@ -632,7 +638,7 @@ mod tests {
                 colorimetry: c,
                 ..full_frame()
             };
-            let packet = frame.clone().into_packets().next().unwrap();
+            let packet = frame.clone().into_packets().value.next().unwrap();
             let decoded = AviInfoFrame::decode(&packet).unwrap();
             assert_eq!(decoded.value.scan_info, scan);
             assert_eq!(decoded.value.colorimetry, c);
@@ -658,7 +664,7 @@ mod tests {
                 picture_aspect_ratio: aspect,
                 ..full_frame()
             };
-            let packet = frame.clone().into_packets().next().unwrap();
+            let packet = frame.clone().into_packets().value.next().unwrap();
             let decoded = AviInfoFrame::decode(&packet).unwrap();
             assert_eq!(decoded.value.bar_info, bar);
             assert_eq!(decoded.value.picture_aspect_ratio, aspect);
@@ -690,7 +696,7 @@ mod tests {
                 non_uniform_scaling: sc,
                 ..full_frame()
             };
-            let packet = frame.clone().into_packets().next().unwrap();
+            let packet = frame.clone().into_packets().value.next().unwrap();
             let decoded = AviInfoFrame::decode(&packet).unwrap();
             assert_eq!(decoded.value.rgb_quantization, rgb_q);
             assert_eq!(decoded.value.ycc_quantization, ycc_q);
@@ -711,7 +717,7 @@ mod tests {
                 it_content_type: cn,
                 ..full_frame()
             };
-            let packet = frame.clone().into_packets().next().unwrap();
+            let packet = frame.clone().into_packets().value.next().unwrap();
             let decoded = AviInfoFrame::decode(&packet).unwrap();
             assert_eq!(decoded.value.it_content_type, cn);
         }
@@ -734,7 +740,7 @@ mod tests {
                 extended_colorimetry: ec,
                 ..full_frame()
             };
-            let packet = frame.clone().into_packets().next().unwrap();
+            let packet = frame.clone().into_packets().value.next().unwrap();
             let decoded = AviInfoFrame::decode(&packet).unwrap();
             assert_eq!(decoded.value.extended_colorimetry, ec);
         }
@@ -743,7 +749,7 @@ mod tests {
     #[test]
     fn unknown_scan_info_warns() {
         // S = 0b11 is reserved; decode should warn and fall back to NoData.
-        let mut packet = full_frame().into_packets().next().unwrap();
+        let mut packet = full_frame().into_packets().value.next().unwrap();
         packet[4] = (packet[4] & !0x03) | 0x03; // set S[1:0] = 0b11
         let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
         packet[3] = packet[3].wrapping_sub(sum);
@@ -761,7 +767,7 @@ mod tests {
     #[test]
     fn unknown_color_format_warns() {
         // Y[2:0] = 0b101 (5) is not a defined ColorFormat.
-        let mut packet = full_frame().into_packets().next().unwrap();
+        let mut packet = full_frame().into_packets().value.next().unwrap();
         packet[4] = (packet[4] & !0xE0) | (5u8 << 5);
         let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
         packet[3] = packet[3].wrapping_sub(sum);
@@ -779,7 +785,7 @@ mod tests {
     #[test]
     fn unknown_rgb_quantization_warns() {
         // Q[1:0] = 0b11 is reserved.
-        let mut packet = full_frame().into_packets().next().unwrap();
+        let mut packet = full_frame().into_packets().value.next().unwrap();
         packet[6] = (packet[6] & !0x0C) | 0x0C; // set Q[1:0] = 0b11
         let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
         packet[3] = packet[3].wrapping_sub(sum);
@@ -797,7 +803,7 @@ mod tests {
     #[test]
     fn unknown_ycc_quantization_warns() {
         // YQ[1:0] = 0b10 is reserved.
-        let mut packet = full_frame().into_packets().next().unwrap();
+        let mut packet = full_frame().into_packets().value.next().unwrap();
         packet[8] = (packet[8] & !0xC0) | 0x80; // set YQ[1:0] = 0b10
         let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
         packet[3] = packet[3].wrapping_sub(sum);
@@ -818,7 +824,7 @@ mod tests {
     #[test]
     fn unknown_picture_aspect_ratio_warns() {
         // M[1:0] = 0b11 is reserved; decode should warn and fall back to NoData.
-        let mut packet = full_frame().into_packets().next().unwrap();
+        let mut packet = full_frame().into_packets().value.next().unwrap();
         packet[5] = (packet[5] & !0x30) | 0x30; // set M[1:0] = 0b11
         let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
         packet[3] = packet[3].wrapping_sub(sum);
@@ -837,9 +843,27 @@ mod tests {
     }
 
     #[test]
+    fn vic_out_of_range_warns_on_encode() {
+        // VIC is a 7-bit field; values > 127 are truncated on the wire and
+        // should produce an UnknownEnumValue warning.
+        let frame = AviInfoFrame {
+            vic: 200,
+            ..full_frame()
+        };
+        let mut encoded = frame.into_packets();
+        assert!(encoded.iter_warnings().any(|w| matches!(
+            w,
+            AviWarning::UnknownEnumValue { field: "vic", raw: 200 }
+        )));
+        // Wire value is 200 & 0x7F = 72.
+        let packet = encoded.value.next().unwrap();
+        assert_eq!(packet[7] & 0x7F, 72);
+    }
+
+    #[test]
     fn short_packet_leaves_bar_data_zeroed() {
         // Encode a minimal packet with length=5 (no bar data).
-        let mut packet = full_frame().into_packets().next().unwrap();
+        let mut packet = full_frame().into_packets().value.next().unwrap();
         packet[2] = 5;
         // Recompute checksum.
         let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));

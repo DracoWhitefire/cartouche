@@ -15,7 +15,7 @@ fuzz_target!(|data: &[u8]| {
             // Round-trip: re-encoding a decoded frame and re-decoding must yield
             // the same value. The checksum is always recomputed on encode, so the
             // re-encoded packet has a valid checksum and no ChecksumMismatch warning.
-            let re_packet = decoded.value.clone().into_packets().next().unwrap();
+            let re_packet = decoded.value.clone().into_packets().value.next().unwrap();
             let re_decoded = AviInfoFrame::decode(&re_packet).unwrap();
             assert_eq!(re_decoded.value, decoded.value);
         }

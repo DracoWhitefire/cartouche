@@ -27,13 +27,21 @@ impl Iterator for SinglePacketIter {
 /// The iterator owns the frame — `into_packets` moves `self`. Callers that need
 /// to retain the frame after encoding should clone before calling.
 ///
+/// # Warnings
+///
+/// Like the decode path, `into_packets` returns a [`Decoded`] that pairs the
+/// packet iterator with any warnings produced during encoding. Callers should
+/// check [`Decoded::iter_warnings`] before transmitting packets.
+///
 /// # Example
 ///
 /// ```rust
 /// # use cartouche::encode::IntoPackets;
 /// # fn transmit(_: &[u8; 31]) {}
 /// # fn example<F: IntoPackets>(frame: F) {
-/// for packet in frame.into_packets() {
+/// let encoded = frame.into_packets();
+/// // (check encoded.iter_warnings() here)
+/// for packet in encoded.value {
 ///     transmit(&packet);
 /// }
 /// # }
@@ -41,7 +49,10 @@ impl Iterator for SinglePacketIter {
 pub trait IntoPackets {
     /// The iterator type that yields wire packets.
     type Iter: Iterator<Item = [u8; 31]>;
+    /// The warning type produced during encoding.
+    type Warning;
 
-    /// Consume the frame and return an iterator over its wire packets.
-    fn into_packets(self) -> Self::Iter;
+    /// Consume the frame and return a [`Decoded`] containing the packet
+    /// iterator and any encode-time warnings.
+    fn into_packets(self) -> crate::decoded::Decoded<Self::Iter, Self::Warning>;
 }

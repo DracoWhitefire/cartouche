@@ -54,7 +54,7 @@ fn avi_round_trip() {
         right_bar: 0,
     };
 
-    let packet = original.clone().into_packets().next().unwrap();
+    let packet = original.clone().into_packets().value.next().unwrap();
     let decoded = AviInfoFrame::decode(&packet).unwrap();
     assert!(
         decoded.iter_warnings().next().is_none(),
@@ -76,7 +76,7 @@ fn audio_round_trip() {
         downmix_inhibit: true,
     };
 
-    let packet = original.clone().into_packets().next().unwrap();
+    let packet = original.clone().into_packets().value.next().unwrap();
     let decoded = AudioInfoFrame::decode(&packet).unwrap();
     assert!(
         decoded.iter_warnings().next().is_none(),
@@ -101,7 +101,7 @@ fn hdr_static_round_trip() {
         }),
     };
 
-    let packet = original.clone().into_packets().next().unwrap();
+    let packet = original.clone().into_packets().value.next().unwrap();
     let decoded = HdrStaticInfoFrame::decode(&packet).unwrap();
     assert!(
         decoded.iter_warnings().next().is_none(),
@@ -131,7 +131,7 @@ fn hdmi_forum_vsi_round_trip() {
         dsc_12bpc: false,
     };
 
-    let packet = original.clone().into_packets().next().unwrap();
+    let packet = original.clone().into_packets().value.next().unwrap();
     let decoded = HdmiForumVsi::decode(&packet).unwrap();
     assert!(
         decoded.iter_warnings().next().is_none(),

@@ -137,6 +137,7 @@ mod tests {
             right_bar: 0,
         }
         .into_packets()
+        .value
         .next()
         .unwrap()
     }
@@ -153,6 +154,7 @@ mod tests {
             downmix_inhibit: false,
         }
         .into_packets()
+        .value
         .next()
         .unwrap()
     }
@@ -172,6 +174,7 @@ mod tests {
             }),
         }
         .into_packets()
+        .value
         .next()
         .unwrap()
     }
@@ -196,6 +199,7 @@ mod tests {
             dsc_12bpc: false,
         }
         .into_packets()
+        .value
         .next()
         .unwrap()
     }
