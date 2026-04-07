@@ -104,13 +104,17 @@ only hard error.
 
 **Dynamic HDR is first-class.** The `IntoPackets` abstraction and the decode API are
 designed for both single-packet and multi-packet (Dynamic HDR) frame types from the
-start. The integration layer's transmission loop is identical for all frame types:
+start. For the four traditional types the transmission loop is already uniform:
 
 ```rust
 for packet in frame.into_packets() {
     transmit(&packet);
 }
 ```
+
+`DynamicHdrInfoFrame::IntoPackets` is planned for the next release alongside
+per-format metadata structs (HDR10+, SL-HDR). Fragment decode and sequence assembly
+are available today.
 
 **No allocation.** All encoding and decoding is done without a heap. The `Iter`
 associated type on `IntoPackets` is a state machine that owns the frame — no `Vec`,
