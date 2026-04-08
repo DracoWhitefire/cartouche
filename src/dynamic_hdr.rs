@@ -722,6 +722,9 @@ impl Hdr10PlusMetadata {
                 let y = r.read_u16(12)?;
                 windows.windows[i].knee_point = Some(KneePoint { x, y });
                 let num_anchors = r.read_u8(4)?;
+                if num_anchors > 9 {
+                    return Err(DecodeError::MalformedPayload);
+                }
                 windows.windows[i].bezier_curve_anchors.count = num_anchors;
                 for j in 0..num_anchors as usize {
                     windows.windows[i].bezier_curve_anchors.anchors[j] = r.read_u16(10)?;
@@ -2211,6 +2214,47 @@ mod tests {
 
     #[test]
     #[cfg(any(feature = "alloc", feature = "std"))]
+    fn hdr10plus_too_many_bezier_anchors_is_malformed() {
+        // Build a payload with tone_mapping_flag=true and num_anchors=10,
+        // which exceeds the 9-slot BezierAnchors array. Must return
+        // MalformedPayload, not panic with an index-out-of-bounds.
+        let mut w = BitWriter::new();
+        w.write_u8(0x01, 8); // application_identifier
+        w.write_u8(0x00, 8); // application_mode
+        w.write_u8(0, 2); // reserved bits
+        w.write_u32(1000, 27); // targeted_system_display_maximum_luminance
+        w.write_bool(false); // targeted_system_display_actual_peak_luminance_flag
+        w.write_u8(0, 2); // num_windows_minus1 = 0 → 1 window
+        // Window 0: minimal fields
+        for _ in 0..6 {
+            w.write_u16(0, 16);
+        } // corners + center
+        w.write_u8(0, 8); // rotation_angle
+        for _ in 0..3 {
+            w.write_u16(0, 16);
+        } // semi-axes
+        w.write_bool(false); // overlap_process_option
+        for _ in 0..3 {
+            w.write_u32(0, 17);
+        } // maxscl
+        w.write_u32(0, 17); // average_maxrgb
+        w.write_u8(0, 4); // num_distribution_maxrgb_percentiles = 0
+        w.write_u16(0, 10); // fraction_bright_pixels
+        w.write_bool(false); // mastering_display_actual_peak_luminance_flag
+        // Tone-mapping pass: tone_mapping_flag=true, num_anchors=10 (out of range)
+        w.write_bool(true); // tone_mapping_flag
+        w.write_u16(0, 12); // knee_point.x
+        w.write_u16(0, 12); // knee_point.y
+        w.write_u8(10, 4); // num_anchors = 10 (exceeds array capacity of 9)
+        let (buf, len) = w.finish();
+        assert!(matches!(
+            Hdr10PlusMetadata::decode(&buf[..len], &mut |_| {}),
+            Err(DecodeError::MalformedPayload)
+        ));
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
     fn hdr10plus_four_windows_is_malformed() {
         // Build a payload with num_windows_minus1 = 3 (raw), which would imply
         // 4 windows — beyond the 3-slot array capacity. Must return MalformedPayload,
@@ -2218,10 +2262,10 @@ mod tests {
         let mut w = BitWriter::new();
         w.write_u8(0x01, 8); // application_identifier
         w.write_u8(0x00, 8); // application_mode
-        w.write_u8(0, 2);    // reserved bits
+        w.write_u8(0, 2); // reserved bits
         w.write_u32(1000, 27); // targeted_system_display_maximum_luminance
         w.write_bool(false); // targeted_system_display_actual_peak_luminance_flag
-        w.write_u8(3, 2);    // num_windows_minus1 = 3 → 4 windows (out of range)
+        w.write_u8(3, 2); // num_windows_minus1 = 3 → 4 windows (out of range)
         let (buf, len) = w.finish();
         assert!(matches!(
             Hdr10PlusMetadata::decode(&buf[..len], &mut |_| {}),
