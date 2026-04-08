@@ -614,6 +614,10 @@ impl DynamicHdrInfoFrame {
         {
             let mut format_warnings: alloc::vec::Vec<DynamicHdrWarning> = alloc::vec::Vec::new();
             decoded.value = match format_id {
+                0x02 => match SlHdrMetadata::decode(&payload, &mut |w| format_warnings.push(w)) {
+                    Ok(meta) => DynamicHdrInfoFrame::SlHdr(alloc::boxed::Box::new(meta)),
+                    Err(e) => return Err(e),
+                },
                 0x04 => match Hdr10PlusMetadata::decode(&payload, &mut |w| format_warnings.push(w))
                 {
                     Ok(meta) => DynamicHdrInfoFrame::Hdr10Plus(alloc::boxed::Box::new(meta)),
@@ -895,6 +899,234 @@ impl Hdr10PlusMetadata {
             tone_mapping_flag: false,
             knee_point: None,
             bezier_curve_anchors: BezierAnchors::default(),
+        })
+    }
+}
+
+#[cfg(any(feature = "alloc", feature = "std"))]
+impl SlHdrMetadata {
+    /// Parse an SL-HDR metadata payload (ETSI TS 103 433-1 Table A.1).
+    ///
+    /// `push_warning` is called for each non-fatal anomaly encountered
+    /// (unrecognised `sl_hdr_payload_mode` values).
+    ///
+    /// # Notes
+    ///
+    /// `GamutMappingEnabledFlag` is not defined within the SL-HDR payload
+    /// itself — it comes from an outer HEVC context unavailable in a standalone
+    /// HDMI payload. The gamut-mapping block is therefore always skipped.
+    /// `gamut_mapping_params()` is likewise undefined in the spec excerpt and
+    /// is not parsed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecodeError::MalformedPayload`] if the payload is too short.
+    pub fn decode(
+        payload: &[u8],
+        push_warning: &mut impl FnMut(DynamicHdrWarning),
+    ) -> Result<Self, DecodeError> {
+        let mut r = BitReader::new(payload);
+
+        let itu_t_t35_country_code = r.read_u8(8)?;
+        let terminal_provider_code = r.read_u16(16)?;
+        let terminal_provider_oriented_code_message_idc = r.read_u8(8)?;
+        let sl_hdr_mode_value_minus1 = r.read_u8(4)?;
+        let sl_hdr_spec_major_version_idc = r.read_u8(4)?;
+        let sl_hdr_spec_minor_version_idc = r.read_u8(7)?;
+        let sl_hdr_cancel_flag = r.read_bool()?;
+
+        let body = if sl_hdr_cancel_flag {
+            None
+        } else {
+            Some(Self::decode_body(&mut r, push_warning)?)
+        };
+
+        Ok(SlHdrMetadata {
+            itu_t_t35_country_code,
+            terminal_provider_code,
+            terminal_provider_oriented_code_message_idc,
+            sl_hdr_mode_value_minus1,
+            sl_hdr_spec_major_version_idc,
+            sl_hdr_spec_minor_version_idc,
+            sl_hdr_cancel_flag,
+            body,
+        })
+    }
+
+    fn decode_body(
+        r: &mut BitReader<'_>,
+        push_warning: &mut impl FnMut(DynamicHdrWarning),
+    ) -> Result<SlHdrBody, DecodeError> {
+        let sl_hdr_persistence_flag = r.read_bool()?;
+        let original_picture_info_present_flag = r.read_bool()?;
+        let target_picture_info_present_flag = r.read_bool()?;
+        let src_mdcv_info_present_flag = r.read_bool()?;
+        let sl_hdr_extension_present_flag = r.read_bool()?;
+        let sl_hdr_payload_mode = r.read_u8(3)?;
+
+        let original_picture_info = if original_picture_info_present_flag {
+            Some(SlHdrPictureInfo {
+                primaries: r.read_u8(8)?,
+                max_luminance: r.read_u16(16)?,
+                min_luminance: r.read_u16(16)?,
+            })
+        } else {
+            None
+        };
+
+        let target_picture_info = if target_picture_info_present_flag {
+            Some(SlHdrPictureInfo {
+                primaries: r.read_u8(8)?,
+                max_luminance: r.read_u16(16)?,
+                min_luminance: r.read_u16(16)?,
+            })
+        } else {
+            None
+        };
+
+        let src_mdcv_info = if src_mdcv_info_present_flag {
+            let mut primaries = [[0u16; 2]; 3];
+            for component in primaries.iter_mut() {
+                component[0] = r.read_u16(16)?; // x
+                component[1] = r.read_u16(16)?; // y
+            }
+            Some(SlHdrMdcvInfo {
+                primaries,
+                ref_white_x: r.read_u16(16)?,
+                ref_white_y: r.read_u16(16)?,
+                max_mastering_luminance: r.read_u16(16)?,
+                min_mastering_luminance: r.read_u16(16)?,
+            })
+        } else {
+            None
+        };
+
+        let mut matrix_coefficient_values = [0u16; 4];
+        for v in matrix_coefficient_values.iter_mut() {
+            *v = r.read_u16(16)?;
+        }
+        let mut chroma_to_luma_injection = [0u16; 2];
+        for v in chroma_to_luma_injection.iter_mut() {
+            *v = r.read_u16(16)?;
+        }
+        let mut k_coefficient_values = [0u8; 3];
+        for v in k_coefficient_values.iter_mut() {
+            *v = r.read_u8(8)?;
+        }
+
+        let payload = match sl_hdr_payload_mode {
+            0 => SlHdrPayload::Mode0(Self::decode_mode0(r)?),
+            1 => SlHdrPayload::Mode1(alloc::boxed::Box::new(Self::decode_mode1(r)?)),
+            other => {
+                push_warning(DynamicHdrWarning::UnknownEnumValue {
+                    field: "sl_hdr_payload_mode",
+                    raw: other,
+                });
+                SlHdrPayload::Unknown(other)
+            }
+        };
+
+        // GamutMappingEnabledFlag is not present in a standalone HDMI payload;
+        // skip the gamut-mapping block entirely.
+
+        let extension = if sl_hdr_extension_present_flag {
+            let extension_6bits = r.read_u8(6)?;
+            let length = r.read_u16(10)? as usize;
+            let mut data = alloc::vec::Vec::with_capacity(length);
+            for _ in 0..length {
+                data.push(r.read_u8(8)?);
+            }
+            Some(SlHdrExtension {
+                extension_6bits,
+                data,
+            })
+        } else {
+            None
+        };
+
+        Ok(SlHdrBody {
+            sl_hdr_persistence_flag,
+            sl_hdr_payload_mode,
+            original_picture_info,
+            target_picture_info,
+            src_mdcv_info,
+            matrix_coefficient_values,
+            chroma_to_luma_injection,
+            k_coefficient_values,
+            payload,
+            extension,
+        })
+    }
+
+    fn decode_mode0(r: &mut BitReader<'_>) -> Result<SlHdrMode0, DecodeError> {
+        let tone_mapping_input_signal_black_level_offset = r.read_u8(8)?;
+        let tone_mapping_input_signal_white_level_offset = r.read_u8(8)?;
+        let shadow_gain_control = r.read_u8(8)?;
+        let highlight_gain_control = r.read_u8(8)?;
+        let mid_tone_width_adjustment_factor = r.read_u8(8)?;
+
+        let ftm_count = r.read_u8(4)?;
+        let sg_count = r.read_u8(4)?;
+        let mut tone_mapping_output_fine_tuning = SlHdrTable15 {
+            count: ftm_count,
+            ..Default::default()
+        };
+        for i in 0..ftm_count as usize {
+            tone_mapping_output_fine_tuning.x[i] = r.read_u8(8)?;
+            tone_mapping_output_fine_tuning.y[i] = r.read_u8(8)?;
+        }
+        let mut saturation_gain = SlHdrTable15 {
+            count: sg_count,
+            ..Default::default()
+        };
+        for i in 0..sg_count as usize {
+            saturation_gain.x[i] = r.read_u8(8)?;
+            saturation_gain.y[i] = r.read_u8(8)?;
+        }
+
+        Ok(SlHdrMode0 {
+            tone_mapping_input_signal_black_level_offset,
+            tone_mapping_input_signal_white_level_offset,
+            shadow_gain_control,
+            highlight_gain_control,
+            mid_tone_width_adjustment_factor,
+            tone_mapping_output_fine_tuning,
+            saturation_gain,
+        })
+    }
+
+    fn decode_mode1(r: &mut BitReader<'_>) -> Result<SlHdrMode1, DecodeError> {
+        let lm_uniform_sampling_flag = r.read_bool()?;
+        let lm_count = r.read_u8(7)?;
+        let mut luminance_mapping = SlHdrTable127 {
+            count: lm_count,
+            ..Default::default()
+        };
+        for i in 0..lm_count as usize {
+            if !lm_uniform_sampling_flag {
+                luminance_mapping.x[i] = r.read_u16(16)?;
+            }
+            luminance_mapping.y[i] = r.read_u16(16)?;
+        }
+
+        let cc_uniform_sampling_flag = r.read_bool()?;
+        let cc_count = r.read_u8(7)?;
+        let mut colour_correction = SlHdrTable127 {
+            count: cc_count,
+            ..Default::default()
+        };
+        for i in 0..cc_count as usize {
+            if !cc_uniform_sampling_flag {
+                colour_correction.x[i] = r.read_u16(16)?;
+            }
+            colour_correction.y[i] = r.read_u16(16)?;
+        }
+
+        Ok(SlHdrMode1 {
+            lm_uniform_sampling_flag,
+            luminance_mapping,
+            cc_uniform_sampling_flag,
+            colour_correction,
         })
     }
 }
@@ -1689,5 +1921,120 @@ mod tests {
             .collect();
         let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
         assert!(matches!(decoded.value, DynamicHdrInfoFrame::Hdr10Plus(_)));
+    }
+
+    // --- SlHdrMetadata::decode tests ---
+
+    /// Build a minimal SL-HDR payload with `sl_hdr_cancel_flag = true`.
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn make_slhdr_cancelled_payload() -> alloc::vec::Vec<u8> {
+        let mut w = BitWriter::new();
+        w.write_u8(0xB5, 8); // itu_t_t35_country_code
+        w.write_u16(0x003C, 16); // terminal_provider_code
+        w.write_u8(0x01, 8); // terminal_provider_oriented_code_message_idc
+        w.write_u8(0, 4); // sl_hdr_mode_value_minus1
+        w.write_u8(1, 4); // sl_hdr_spec_major_version_idc
+        w.write_u8(0, 7); // sl_hdr_spec_minor_version_idc
+        w.write_bool(true); // sl_hdr_cancel_flag = true → no body
+        let (buf, len) = w.finish();
+        buf[..len].to_vec()
+    }
+
+    /// Build a minimal SL-HDR mode-0 payload (no optional info blocks,
+    /// no extension, empty fine-tuning and saturation-gain tables).
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn make_slhdr_mode0_payload() -> alloc::vec::Vec<u8> {
+        let mut w = BitWriter::new();
+        // Header
+        w.write_u8(0xB5, 8);
+        w.write_u16(0x003C, 16);
+        w.write_u8(0x01, 8);
+        w.write_u8(0, 4); // sl_hdr_mode_value_minus1
+        w.write_u8(1, 4); // sl_hdr_spec_major_version_idc
+        w.write_u8(0, 7); // sl_hdr_spec_minor_version_idc
+        w.write_bool(false); // sl_hdr_cancel_flag = false
+        // Body flags
+        w.write_bool(true); // sl_hdr_persistence_flag
+        w.write_bool(false); // original_picture_info_present_flag
+        w.write_bool(false); // target_picture_info_present_flag
+        w.write_bool(false); // src_mdcv_info_present_flag
+        w.write_bool(false); // sl_hdr_extension_present_flag
+        w.write_u8(0, 3); // sl_hdr_payload_mode = 0
+        // matrix_coefficient_values (4 × 16)
+        for _ in 0..4 {
+            w.write_u16(0, 16);
+        }
+        // chroma_to_luma_injection (2 × 16)
+        for _ in 0..2 {
+            w.write_u16(0, 16);
+        }
+        // k_coefficient_values (3 × 8)
+        for _ in 0..3 {
+            w.write_u8(0, 8);
+        }
+        // Mode 0 fields
+        w.write_u8(10, 8); // black_level_offset
+        w.write_u8(20, 8); // white_level_offset
+        w.write_u8(30, 8); // shadow_gain_control
+        w.write_u8(40, 8); // highlight_gain_control
+        w.write_u8(50, 8); // mid_tone_width_adjustment_factor
+        w.write_u8(0, 4); // tone_mapping_output_fine_tuning_num_val = 0
+        w.write_u8(0, 4); // saturation_gain_num_val = 0
+        let (buf, len) = w.finish();
+        buf[..len].to_vec()
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn slhdr_cancel_flag_produces_no_body() {
+        let payload = make_slhdr_cancelled_payload();
+        let meta = SlHdrMetadata::decode(&payload, &mut |_| {}).unwrap();
+        assert!(meta.sl_hdr_cancel_flag);
+        assert!(meta.body.is_none());
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn slhdr_mode0_decode() {
+        let payload = make_slhdr_mode0_payload();
+        let meta = SlHdrMetadata::decode(&payload, &mut |_| {}).unwrap();
+        assert!(!meta.sl_hdr_cancel_flag);
+        let body = meta.body.as_ref().unwrap();
+        assert_eq!(body.sl_hdr_payload_mode, 0);
+        match &body.payload {
+            SlHdrPayload::Mode0(m) => {
+                assert_eq!(m.tone_mapping_input_signal_black_level_offset, 10);
+                assert_eq!(m.tone_mapping_input_signal_white_level_offset, 20);
+                assert_eq!(m.shadow_gain_control, 30);
+                assert_eq!(m.highlight_gain_control, 40);
+                assert_eq!(m.mid_tone_width_adjustment_factor, 50);
+                assert_eq!(m.tone_mapping_output_fine_tuning.count, 0);
+                assert_eq!(m.saturation_gain.count, 0);
+            }
+            other => panic!("expected Mode0, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn slhdr_malformed_short_payload_is_error() {
+        assert!(matches!(
+            SlHdrMetadata::decode(&[], &mut |_| {}),
+            Err(DecodeError::MalformedPayload)
+        ));
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn slhdr_decode_sequence_dispatches_to_slhdr_variant() {
+        let payload = make_slhdr_cancelled_payload();
+        let total = payload.len() as u16;
+        let pkts: alloc::vec::Vec<[u8; 31]> = payload
+            .chunks(23)
+            .enumerate()
+            .map(|(i, chunk)| make_packet(i as u8, total, 0x02, chunk))
+            .collect();
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
+        assert!(matches!(decoded.value, DynamicHdrInfoFrame::SlHdr(_)));
     }
 }
