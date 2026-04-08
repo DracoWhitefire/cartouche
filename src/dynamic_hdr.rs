@@ -1834,6 +1834,56 @@ mod tests {
 
     #[test]
     #[cfg(any(feature = "alloc", feature = "std"))]
+    fn decode_sequence_hdr10plus_inner_error_propagates() {
+        // Single packet with format_id=0x04 but only 1 byte of payload —
+        // too short for Hdr10PlusMetadata::decode → MalformedPayload.
+        let pkt = make_packet(0, 1, 0x04, &[0x01]);
+        let result = DynamicHdrInfoFrame::decode_sequence(&[pkt]);
+        assert!(
+            matches!(result, Err(DecodeError::MalformedPayload)),
+            "expected MalformedPayload, got {result:?}"
+        );
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn decode_sequence_slhdr_inner_error_propagates() {
+        // Single packet with format_id=0x02 but only 1 byte of payload —
+        // too short for SlHdrMetadata::decode → MalformedPayload.
+        let pkt = make_packet(0, 1, 0x02, &[0xB5]);
+        let result = DynamicHdrInfoFrame::decode_sequence(&[pkt]);
+        assert!(
+            matches!(result, Err(DecodeError::MalformedPayload)),
+            "expected MalformedPayload, got {result:?}"
+        );
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn decode_sequence_format_warnings_forwarded() {
+        // A valid HDR10+ payload with reserved bits set causes
+        // Hdr10PlusMetadata::decode to emit warnings; decode_sequence must
+        // forward them onto the returned Decoded value.
+        let (mut payload, _) = make_minimal_hdr10plus_payload();
+        payload[2] |= 0b1100_0000; // set both reserved bits
+        let total = payload.len() as u16;
+        let pkts: alloc::vec::Vec<[u8; 31]> = payload
+            .chunks(23)
+            .enumerate()
+            .map(|(i, chunk)| make_packet(i as u8, total, 0x04, chunk))
+            .collect();
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
+        assert!(
+            decoded.iter_warnings().any(|w| matches!(
+                w,
+                DynamicHdrWarning::ReservedFieldNonZero { .. }
+            )),
+            "expected ReservedFieldNonZero warning to be forwarded"
+        );
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
     fn into_packets_seq_nums_sequential() {
         use crate::encode::IntoPackets;
 
@@ -2427,6 +2477,22 @@ mod tests {
 
     #[test]
     #[cfg(any(feature = "alloc", feature = "std"))]
+    fn slhdr_cancelled_round_trip() {
+        use crate::encode::IntoPackets;
+
+        let payload = make_slhdr_cancelled_payload();
+        let original = SlHdrMetadata::decode(&payload, &mut |_| {}).unwrap();
+        let frame = DynamicHdrInfoFrame::SlHdr(alloc::boxed::Box::new(original.clone()));
+        let pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
+        match decoded.value {
+            DynamicHdrInfoFrame::SlHdr(meta) => assert_eq!(*meta, original),
+            other => panic!("expected SlHdr, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
     fn slhdr_unknown_payload_mode_warning() {
         // Build a minimal SL-HDR body with sl_hdr_payload_mode = 7 (unknown).
         let mut w = BitWriter::new();
@@ -2468,6 +2534,16 @@ mod tests {
         )));
         let body = meta.body.as_ref().unwrap();
         assert!(matches!(body.payload, SlHdrPayload::Unknown(7)));
+
+        // Encoding must not panic and must round-trip the struct.
+        use crate::encode::IntoPackets;
+        let frame = DynamicHdrInfoFrame::SlHdr(alloc::boxed::Box::new(meta.clone()));
+        let pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
+        match decoded.value {
+            DynamicHdrInfoFrame::SlHdr(re_meta) => assert_eq!(re_meta.body, meta.body),
+            other => panic!("expected SlHdr, got {other:?}"),
+        }
     }
 
     #[test]
