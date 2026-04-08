@@ -428,10 +428,195 @@ impl DynamicHdrInfoFrame {
 
         #[cfg(any(feature = "alloc", feature = "std"))]
         {
-            decoded.value = DynamicHdrInfoFrame::Unknown { format_id, payload };
+            let mut format_warnings: alloc::vec::Vec<DynamicHdrWarning> = alloc::vec::Vec::new();
+            decoded.value = match format_id {
+                0x04 => match Hdr10PlusMetadata::decode(&payload, &mut |w| format_warnings.push(w))
+                {
+                    Ok(meta) => DynamicHdrInfoFrame::Hdr10Plus(alloc::boxed::Box::new(meta)),
+                    Err(e) => return Err(e),
+                },
+                _ => DynamicHdrInfoFrame::Unknown { format_id, payload },
+            };
+            for w in format_warnings {
+                decoded.push_warning(w);
+            }
         }
 
         Ok(decoded)
+    }
+}
+
+#[cfg(any(feature = "alloc", feature = "std"))]
+impl Hdr10PlusMetadata {
+    /// Parse a HDR10+ metadata payload (ETSI TS 103 433-1 §6.1).
+    ///
+    /// `push_warning` is called for each non-fatal anomaly encountered.
+    pub(crate) fn decode(
+        payload: &[u8],
+        push_warning: &mut impl FnMut(DynamicHdrWarning),
+    ) -> Result<Self, DecodeError> {
+        let mut r = BitReader::new(payload);
+
+        let application_identifier = r.read_u8(8)?;
+        let application_mode = r.read_u8(8)?;
+
+        if application_mode > 1 {
+            push_warning(DynamicHdrWarning::UnknownEnumValue {
+                field: "application_mode",
+                raw: application_mode,
+            });
+        }
+
+        let scene_frame_switching_flag = if application_mode == 1 {
+            r.read_bool()?
+        } else {
+            false
+        };
+
+        // Two reserved bits following application_mode (and optional switching flag).
+        for _ in 0..2 {
+            let byte_idx = r.byte_pos as u8;
+            let bit_idx = 7 - r.bit_pos; // convert MSB-first pos → conventional bit number
+            if r.read_bool()? {
+                push_warning(DynamicHdrWarning::ReservedFieldNonZero {
+                    byte: byte_idx,
+                    bit: bit_idx,
+                });
+            }
+        }
+
+        let targeted_system_display_maximum_luminance = r.read_u32(27)?;
+
+        let targeted_system_display_actual_peak_luminance_flag = r.read_bool()?;
+        let targeted_system_display_actual_peak_luminance =
+            if targeted_system_display_actual_peak_luminance_flag {
+                Some(Self::decode_actual_peak_luminance(&mut r)?)
+            } else {
+                None
+            };
+
+        // num_windows is stored as (count − 1) in 2 bits, giving 1–3 windows.
+        let num_windows = r.read_u8(2)? + 1;
+        let mut windows = Hdr10PlusWindows {
+            count: num_windows,
+            ..Default::default()
+        };
+        for i in 0..num_windows as usize {
+            windows.windows[i] = Self::decode_window(&mut r)?;
+        }
+
+        let mastering_display_actual_peak_luminance_flag = r.read_bool()?;
+        let mastering_display_actual_peak_luminance =
+            if mastering_display_actual_peak_luminance_flag {
+                Some(Self::decode_actual_peak_luminance(&mut r)?)
+            } else {
+                None
+            };
+
+        // Tone-mapping data is read in a second pass over the windows.
+        for i in 0..num_windows as usize {
+            let tone_mapping_flag = r.read_bool()?;
+            windows.windows[i].tone_mapping_flag = tone_mapping_flag;
+            if tone_mapping_flag {
+                let x = r.read_u16(12)?;
+                let y = r.read_u16(12)?;
+                windows.windows[i].knee_point = Some(KneePoint { x, y });
+                let num_anchors = r.read_u8(4)?;
+                windows.windows[i].bezier_curve_anchors.count = num_anchors;
+                for j in 0..num_anchors as usize {
+                    windows.windows[i].bezier_curve_anchors.anchors[j] = r.read_u16(10)?;
+                }
+            }
+        }
+
+        let color_saturation_mapping_flag = r.read_bool()?;
+        let color_saturation_weight = if color_saturation_mapping_flag {
+            Some(r.read_u8(6)?)
+        } else {
+            None
+        };
+
+        Ok(Hdr10PlusMetadata {
+            application_identifier,
+            application_mode,
+            scene_frame_switching_flag,
+            targeted_system_display_maximum_luminance,
+            targeted_system_display_actual_peak_luminance_flag,
+            targeted_system_display_actual_peak_luminance,
+            windows,
+            mastering_display_actual_peak_luminance_flag,
+            mastering_display_actual_peak_luminance,
+            color_saturation_mapping_flag,
+            color_saturation_weight,
+        })
+    }
+
+    fn decode_actual_peak_luminance(
+        r: &mut BitReader<'_>,
+    ) -> Result<ActualPeakLuminance, DecodeError> {
+        let num_rows = r.read_u8(5)?;
+        let num_cols = r.read_u8(5)?;
+        let mut entries = [[0u8; 25]; 25];
+        for row in entries.iter_mut().take(num_rows as usize) {
+            for entry in row.iter_mut().take(num_cols as usize) {
+                *entry = r.read_u8(4)?;
+            }
+        }
+        Ok(ActualPeakLuminance {
+            num_rows,
+            num_cols,
+            entries,
+        })
+    }
+
+    fn decode_window(r: &mut BitReader<'_>) -> Result<Hdr10PlusWindow, DecodeError> {
+        let upper_left_corner_x = r.read_u16(16)?;
+        let upper_left_corner_y = r.read_u16(16)?;
+        let lower_right_corner_x = r.read_u16(16)?;
+        let lower_right_corner_y = r.read_u16(16)?;
+        let center_of_ellipse_x = r.read_u16(16)?;
+        let center_of_ellipse_y = r.read_u16(16)?;
+        let rotation_angle = r.read_u8(8)?;
+        let semimajor_axis_internal_ellipse = r.read_u16(16)?;
+        let semimajor_axis_external_ellipse = r.read_u16(16)?;
+        let semiminor_axis_external_ellipse = r.read_u16(16)?;
+        let overlap_process_option = r.read_bool()?;
+        let maxscl = [r.read_u32(17)?, r.read_u32(17)?, r.read_u32(17)?];
+        let average_maxrgb = r.read_u32(17)?;
+
+        let num_percentiles = r.read_u8(4)?;
+        let mut distribution_maxrgb = DistributionMaxrgb {
+            count: num_percentiles,
+            ..Default::default()
+        };
+        for i in 0..num_percentiles as usize {
+            distribution_maxrgb.percentages[i] = r.read_u8(7)?;
+            distribution_maxrgb.percentiles[i] = r.read_u32(17)?;
+        }
+
+        let fraction_bright_pixels = r.read_u16(10)?;
+
+        Ok(Hdr10PlusWindow {
+            upper_left_corner_x,
+            upper_left_corner_y,
+            lower_right_corner_x,
+            lower_right_corner_y,
+            center_of_ellipse_x,
+            center_of_ellipse_y,
+            rotation_angle,
+            semimajor_axis_internal_ellipse,
+            semimajor_axis_external_ellipse,
+            semiminor_axis_external_ellipse,
+            overlap_process_option,
+            maxscl,
+            average_maxrgb,
+            distribution_maxrgb,
+            fraction_bright_pixels,
+            // tone_mapping fields are filled in the second pass in decode()
+            tone_mapping_flag: false,
+            knee_point: None,
+            bezier_curve_anchors: BezierAnchors::default(),
+        })
     }
 }
 
@@ -821,7 +1006,7 @@ mod tests {
 
     #[test]
     fn checksum_mismatch_warning() {
-        let mut packet = make_packet(0, 23, 0x04, &[0u8; 23]);
+        let mut packet = make_packet(0, 23, 0xFF, &[0u8; 23]);
         packet[3] = packet[3].wrapping_add(1); // corrupt checksum
         let decoded = DynamicHdrFragment::decode(&packet).unwrap();
         assert!(
@@ -867,13 +1052,13 @@ mod tests {
 
     #[test]
     fn decode_sequence_single_packet_unknown_format() {
-        let packet = make_packet(0, 23, 0x04, &[0xAAu8; 23]);
+        let packet = make_packet(0, 23, 0xFF, &[0xAAu8; 23]);
         let decoded = DynamicHdrInfoFrame::decode_sequence(&[packet]).unwrap();
         assert!(decoded.iter_warnings().next().is_none());
         assert_eq!(
             decoded.value,
             DynamicHdrInfoFrame::Unknown {
-                format_id: 0x04,
+                format_id: 0xFF,
                 #[cfg(any(feature = "alloc", feature = "std"))]
                 payload: vec![0xAAu8; 23],
             }
@@ -882,8 +1067,8 @@ mod tests {
 
     #[test]
     fn decode_sequence_multi_packet_payload_assembled() {
-        let p0 = make_packet(0, 46, 0x04, &[0xAAu8; 23]);
-        let p1 = make_packet(1, 46, 0x04, &[0xBBu8; 23]);
+        let p0 = make_packet(0, 46, 0xFF, &[0xAAu8; 23]);
+        let p1 = make_packet(1, 46, 0xFF, &[0xBBu8; 23]);
         let decoded = DynamicHdrInfoFrame::decode_sequence(&[p0, p1]).unwrap();
         assert!(decoded.iter_warnings().next().is_none());
         #[cfg(any(feature = "alloc", feature = "std"))]
@@ -896,7 +1081,7 @@ mod tests {
             assert_eq!(
                 decoded.value,
                 DynamicHdrInfoFrame::Unknown {
-                    format_id: 0x04,
+                    format_id: 0xFF,
                     payload: expected,
                 }
             );
@@ -905,7 +1090,7 @@ mod tests {
 
     #[test]
     fn decode_sequence_checksum_mismatch_warning() {
-        let mut p0 = make_packet(0, 23, 0x04, &[0u8; 23]);
+        let mut p0 = make_packet(0, 23, 0xFF, &[0u8; 23]);
         p0[3] = p0[3].wrapping_add(1); // corrupt checksum
         let decoded = DynamicHdrInfoFrame::decode_sequence(&[p0]).unwrap();
         assert!(
@@ -917,7 +1102,7 @@ mod tests {
 
     #[test]
     fn decode_sequence_truncated_returns_error() {
-        let mut p0 = make_packet(0, 23, 0x04, &[0u8; 23]);
+        let mut p0 = make_packet(0, 23, 0xFF, &[0u8; 23]);
         p0[2] = 28; // > 27
         assert!(matches!(
             DynamicHdrInfoFrame::decode_sequence(&[p0]),
@@ -928,7 +1113,7 @@ mod tests {
     #[test]
     fn decode_sequence_out_of_order_seq_num_warning() {
         // seq_num = 5 in a packet at index 0.
-        let mut p0 = make_packet(0, 23, 0x04, &[0u8; 23]);
+        let mut p0 = make_packet(0, 23, 0xFF, &[0u8; 23]);
         p0[4] = 5;
         // Recompute checksum after tampering.
         let sum: u8 = p0.iter().fold(0u8, |a, &b| a.wrapping_add(b));
@@ -942,9 +1127,9 @@ mod tests {
 
     #[test]
     fn decode_sequence_inconsistent_total_bytes_warning() {
-        let p0 = make_packet(0, 46, 0x04, &[0u8; 23]);
+        let p0 = make_packet(0, 46, 0xFF, &[0u8; 23]);
         // p1 declares a different total_bytes.
-        let p1 = make_packet(1, 99, 0x04, &[0u8; 23]);
+        let p1 = make_packet(1, 99, 0xFF, &[0u8; 23]);
         let decoded = DynamicHdrInfoFrame::decode_sequence(&[p0, p1]).unwrap();
         assert!(decoded.iter_warnings().any(|w| matches!(
             w,
@@ -958,15 +1143,15 @@ mod tests {
 
     #[test]
     fn decode_sequence_inconsistent_format_id_warning() {
-        let p0 = make_packet(0, 46, 0x04, &[0u8; 23]);
-        let p1 = make_packet(1, 46, 0x02, &[0u8; 23]);
+        let p0 = make_packet(0, 46, 0xFF, &[0u8; 23]);
+        let p1 = make_packet(1, 46, 0xFE, &[0u8; 23]);
         let decoded = DynamicHdrInfoFrame::decode_sequence(&[p0, p1]).unwrap();
         assert!(decoded.iter_warnings().any(|w| matches!(
             w,
             DynamicHdrWarning::InconsistentFormatId {
                 packet: 1,
-                expected: 0x04,
-                found: 0x02,
+                expected: 0xFF,
+                found: 0xFE,
             }
         )));
     }
@@ -1078,5 +1263,121 @@ mod tests {
             payload: alloc::vec![],
         };
         assert!(frame.into_packets().value.next().is_none());
+    }
+
+    // --- Hdr10PlusMetadata::decode tests ---
+
+    /// Build a minimal valid HDR10+ payload using BitWriter:
+    /// application_mode=0, no optional fields, 1 window with all-zero fields.
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn make_minimal_hdr10plus_payload() -> (alloc::vec::Vec<u8>, Hdr10PlusMetadata) {
+        let mut w = BitWriter::new();
+        w.write_u8(0x01, 8); // application_identifier
+        w.write_u8(0x00, 8); // application_mode = 0 (scene-based)
+        // no scene_frame_switching_flag (mode != 1)
+        w.write_u8(0, 2); // 2 reserved bits
+        w.write_u32(1000, 27); // targeted_system_display_maximum_luminance
+        w.write_bool(false); // targeted_system_display_actual_peak_luminance_flag
+        w.write_u8(0, 2); // num_windows − 1 = 0  →  1 window
+        // Window 0: all-zero fields, in decode_window() read order.
+        for _ in 0..6 {
+            w.write_u16(0, 16);
+        } // upper/lower corners + center (6 × 16)
+        w.write_u8(0, 8); // rotation_angle
+        for _ in 0..3 {
+            w.write_u16(0, 16);
+        } // ellipse semi-axes (3 × 16)
+        w.write_bool(false); // overlap_process_option
+        for _ in 0..3 {
+            w.write_u32(0, 17);
+        } // maxscl (3 × 17)
+        w.write_u32(0, 17); // average_maxrgb
+        w.write_u8(0, 4); // num_distribution_maxrgb_percentiles = 0
+        w.write_u16(0, 10); // fraction_bright_pixels
+        w.write_bool(false); // mastering_display_actual_peak_luminance_flag
+        // Tone mapping pass (1 window)
+        w.write_bool(false); // tone_mapping_flag = 0
+        w.write_bool(false); // color_saturation_mapping_flag
+
+        let (buf, len) = w.finish();
+        let payload = buf[..len].to_vec();
+
+        let expected = Hdr10PlusMetadata {
+            application_identifier: 0x01,
+            application_mode: 0x00,
+            scene_frame_switching_flag: false,
+            targeted_system_display_maximum_luminance: 1000,
+            targeted_system_display_actual_peak_luminance_flag: false,
+            targeted_system_display_actual_peak_luminance: None,
+            windows: Hdr10PlusWindows {
+                count: 1,
+                windows: [
+                    Hdr10PlusWindow::default(),
+                    Hdr10PlusWindow::default(),
+                    Hdr10PlusWindow::default(),
+                ],
+            },
+            mastering_display_actual_peak_luminance_flag: false,
+            mastering_display_actual_peak_luminance: None,
+            color_saturation_mapping_flag: false,
+            color_saturation_weight: None,
+        };
+        (payload, expected)
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn hdr10plus_single_window_no_optional_fields() {
+        let (payload, expected) = make_minimal_hdr10plus_payload();
+        let mut warnings = alloc::vec::Vec::new();
+        let got = Hdr10PlusMetadata::decode(&payload, &mut |w| warnings.push(w)).unwrap();
+        assert!(warnings.is_empty());
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn hdr10plus_malformed_short_payload_is_error() {
+        // Empty payload must fail.
+        assert!(matches!(
+            Hdr10PlusMetadata::decode(&[], &mut |_| {}),
+            Err(DecodeError::MalformedPayload)
+        ));
+        // Truncated mid-stream must also fail.
+        assert!(matches!(
+            Hdr10PlusMetadata::decode(&[0x01, 0x00], &mut |_| {}),
+            Err(DecodeError::MalformedPayload)
+        ));
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn hdr10plus_reserved_bits_set_warning() {
+        let (mut payload, _) = make_minimal_hdr10plus_payload();
+        // The two reserved bits follow byte 1 (application_mode) at bits 6 and 5
+        // of byte 2 (MSB-first). Set both by OR-ing 0b1100_0000 into byte 2.
+        payload[2] |= 0b1100_0000;
+        let mut warnings = alloc::vec::Vec::new();
+        Hdr10PlusMetadata::decode(&payload, &mut |w| warnings.push(w)).unwrap();
+        assert!(
+            warnings
+                .iter()
+                .any(|w| matches!(w, DynamicHdrWarning::ReservedFieldNonZero { .. }))
+        );
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn hdr10plus_decode_sequence_dispatches_to_hdr10plus_variant() {
+        let (payload, _) = make_minimal_hdr10plus_payload();
+        let total = payload.len() as u16;
+        // Split into 23-byte chunks across multiple packets.
+        let pkts: alloc::vec::Vec<[u8; 31]> = payload
+            .chunks(23)
+            .enumerate()
+            .map(|(i, chunk)| make_packet(i as u8, total, 0x04, chunk))
+            .collect();
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
+        assert!(matches!(decoded.value, DynamicHdrInfoFrame::Hdr10Plus(_)));
     }
 }
