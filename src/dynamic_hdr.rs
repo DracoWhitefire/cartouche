@@ -1912,6 +1912,165 @@ mod tests {
 
     // --- Hdr10PlusMetadata::decode tests ---
 
+    /// Build an HDR10+ payload exercising all optional fields:
+    /// application_mode=1 (scene_frame_switching_flag present), both actual-peak-luminance
+    /// tables populated, distribution_maxrgb with 2 entries, tone_mapping_flag=true with
+    /// knee point and 2 bezier anchors, color_saturation_mapping_flag=true.
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn make_full_hdr10plus_payload() -> (alloc::vec::Vec<u8>, Hdr10PlusMetadata) {
+        let mut w = BitWriter::new();
+        w.write_u8(0x02, 8); // application_identifier
+        w.write_u8(0x01, 8); // application_mode = 1 → scene_frame_switching_flag follows
+        w.write_bool(true);  // scene_frame_switching_flag
+        w.write_u8(0, 2);    // 2 reserved bits
+        w.write_u32(2000, 27); // targeted_system_display_maximum_luminance
+        // targeted_system_display_actual_peak_luminance: 2×2 table
+        w.write_bool(true);
+        w.write_u8(2, 5); // num_rows
+        w.write_u8(2, 5); // num_cols
+        w.write_u8(3, 4); // [0][0]
+        w.write_u8(5, 4); // [0][1]
+        w.write_u8(7, 4); // [1][0]
+        w.write_u8(9, 4); // [1][1]
+        // 1 window (stored as count − 1 = 0)
+        w.write_u8(0, 2);
+        // Window 0
+        w.write_u16(10, 16);  // upper_left_corner_x
+        w.write_u16(20, 16);  // upper_left_corner_y
+        w.write_u16(200, 16); // lower_right_corner_x
+        w.write_u16(300, 16); // lower_right_corner_y
+        w.write_u16(100, 16); // center_of_ellipse_x
+        w.write_u16(150, 16); // center_of_ellipse_y
+        w.write_u8(45, 8);    // rotation_angle
+        w.write_u16(50, 16);  // semimajor_axis_internal_ellipse
+        w.write_u16(60, 16);  // semimajor_axis_external_ellipse
+        w.write_u16(30, 16);  // semiminor_axis_external_ellipse
+        w.write_bool(true);   // overlap_process_option
+        w.write_u32(1000, 17); // maxscl[0]
+        w.write_u32(2000, 17); // maxscl[1]
+        w.write_u32(3000, 17); // maxscl[2]
+        w.write_u32(500, 17);  // average_maxrgb
+        // distribution_maxrgb: 2 entries
+        w.write_u8(2, 4);
+        w.write_u8(25, 7);     // percentages[0]
+        w.write_u32(100, 17);  // percentiles[0]
+        w.write_u8(75, 7);     // percentages[1]
+        w.write_u32(800, 17);  // percentiles[1]
+        w.write_u16(512, 10);  // fraction_bright_pixels
+        // mastering_display_actual_peak_luminance: 1×1 table
+        w.write_bool(true);
+        w.write_u8(1, 5); // num_rows
+        w.write_u8(1, 5); // num_cols
+        w.write_u8(12, 4); // [0][0]
+        // Tone-mapping pass (1 window, tone_mapping_flag=true)
+        w.write_bool(true);
+        w.write_u16(100, 12); // knee_point.x
+        w.write_u16(200, 12); // knee_point.y
+        w.write_u8(2, 4);     // num_anchors
+        w.write_u16(300, 10); // anchors[0]
+        w.write_u16(400, 10); // anchors[1]
+        // color_saturation_mapping_flag=true + weight
+        w.write_bool(true);
+        w.write_u8(42, 6); // color_saturation_weight
+        let (buf, len) = w.finish();
+        let payload = buf[..len].to_vec();
+
+        let mut tgt_entries = [[0u8; 25]; 25];
+        tgt_entries[0][0] = 3;
+        tgt_entries[0][1] = 5;
+        tgt_entries[1][0] = 7;
+        tgt_entries[1][1] = 9;
+        let mut mast_entries = [[0u8; 25]; 25];
+        mast_entries[0][0] = 12;
+        let mut dist = DistributionMaxrgb {
+            count: 2,
+            ..Default::default()
+        };
+        dist.percentages[0] = 25;
+        dist.percentiles[0] = 100;
+        dist.percentages[1] = 75;
+        dist.percentiles[1] = 800;
+        let mut bezier = BezierAnchors {
+            count: 2,
+            ..Default::default()
+        };
+        bezier.anchors[0] = 300;
+        bezier.anchors[1] = 400;
+
+        let expected = Hdr10PlusMetadata {
+            application_identifier: 0x02,
+            application_mode: 0x01,
+            scene_frame_switching_flag: true,
+            targeted_system_display_maximum_luminance: 2000,
+            targeted_system_display_actual_peak_luminance_flag: true,
+            targeted_system_display_actual_peak_luminance: Some(ActualPeakLuminance {
+                num_rows: 2,
+                num_cols: 2,
+                entries: tgt_entries,
+            }),
+            windows: Hdr10PlusWindows {
+                count: 1,
+                windows: [
+                    Hdr10PlusWindow {
+                        upper_left_corner_x: 10,
+                        upper_left_corner_y: 20,
+                        lower_right_corner_x: 200,
+                        lower_right_corner_y: 300,
+                        center_of_ellipse_x: 100,
+                        center_of_ellipse_y: 150,
+                        rotation_angle: 45,
+                        semimajor_axis_internal_ellipse: 50,
+                        semimajor_axis_external_ellipse: 60,
+                        semiminor_axis_external_ellipse: 30,
+                        overlap_process_option: true,
+                        maxscl: [1000, 2000, 3000],
+                        average_maxrgb: 500,
+                        distribution_maxrgb: dist,
+                        fraction_bright_pixels: 512,
+                        tone_mapping_flag: true,
+                        knee_point: Some(KneePoint { x: 100, y: 200 }),
+                        bezier_curve_anchors: bezier,
+                    },
+                    Hdr10PlusWindow::default(),
+                    Hdr10PlusWindow::default(),
+                ],
+            },
+            mastering_display_actual_peak_luminance_flag: true,
+            mastering_display_actual_peak_luminance: Some(ActualPeakLuminance {
+                num_rows: 1,
+                num_cols: 1,
+                entries: mast_entries,
+            }),
+            color_saturation_mapping_flag: true,
+            color_saturation_weight: Some(42),
+        };
+        (payload, expected)
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn hdr10plus_full_fields_decode() {
+        let (payload, expected) = make_full_hdr10plus_payload();
+        let mut warnings = alloc::vec::Vec::new();
+        let got = Hdr10PlusMetadata::decode(&payload, &mut |w| warnings.push(w)).unwrap();
+        assert!(warnings.is_empty());
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn hdr10plus_full_fields_round_trip() {
+        use crate::encode::IntoPackets;
+        let (_, original) = make_full_hdr10plus_payload();
+        let frame = DynamicHdrInfoFrame::Hdr10Plus(alloc::boxed::Box::new(original.clone()));
+        let pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
+        match decoded.value {
+            DynamicHdrInfoFrame::Hdr10Plus(meta) => assert_eq!(*meta, original),
+            other => panic!("expected Hdr10Plus, got {other:?}"),
+        }
+    }
+
     /// Build a minimal valid HDR10+ payload using BitWriter:
     /// application_mode=0, no optional fields, 1 window with all-zero fields.
     #[cfg(any(feature = "alloc", feature = "std"))]
@@ -2045,6 +2204,131 @@ mod tests {
     }
 
     // --- SlHdrMetadata::decode tests ---
+
+    /// Build an SL-HDR mode-0 payload with all optional body fields present:
+    /// original_picture_info, target_picture_info, src_mdcv_info, and mode-0
+    /// fine-tuning (2 entries) and saturation-gain (1 entry) tables.
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn make_slhdr_full_body_payload() -> (alloc::vec::Vec<u8>, SlHdrMetadata) {
+        let mut w = BitWriter::new();
+        // Header
+        w.write_u8(0xB5, 8);
+        w.write_u16(0x003C, 16);
+        w.write_u8(0x01, 8);
+        w.write_u8(0, 4); // sl_hdr_mode_value_minus1
+        w.write_u8(1, 4); // sl_hdr_spec_major_version_idc
+        w.write_u8(0, 7); // sl_hdr_spec_minor_version_idc
+        w.write_bool(false); // sl_hdr_cancel_flag
+        // Body flags — all optional blocks present, mode 0
+        w.write_bool(true);  // sl_hdr_persistence_flag
+        w.write_bool(true);  // original_picture_info_present_flag
+        w.write_bool(true);  // target_picture_info_present_flag
+        w.write_bool(true);  // src_mdcv_info_present_flag
+        w.write_bool(false); // sl_hdr_extension_present_flag
+        w.write_u8(0, 3);    // sl_hdr_payload_mode = 0
+        // original_picture_info
+        w.write_u8(1, 8);      w.write_u16(1000, 16); w.write_u16(5, 16);
+        // target_picture_info
+        w.write_u8(9, 8);      w.write_u16(400, 16);  w.write_u16(1, 16);
+        // src_mdcv_info: primaries (3 × x,y), ref_white, mastering luminance
+        w.write_u16(100, 16); w.write_u16(200, 16); // primaries[0]
+        w.write_u16(300, 16); w.write_u16(400, 16); // primaries[1]
+        w.write_u16(500, 16); w.write_u16(600, 16); // primaries[2]
+        w.write_u16(700, 16); w.write_u16(800, 16); // ref_white_x, ref_white_y
+        w.write_u16(900, 16); w.write_u16(10, 16);  // max/min mastering luminance
+        // matrix_coefficient_values (4 × 16)
+        for v in [1u16, 2, 3, 4] { w.write_u16(v, 16); }
+        // chroma_to_luma_injection (2 × 16)
+        for v in [5u16, 6] { w.write_u16(v, 16); }
+        // k_coefficient_values (3 × 8)
+        for v in [7u8, 8, 9] { w.write_u8(v, 8); }
+        // Mode 0: five scalars, then ftm_count(4), sg_count(4), ftm entries, sg entries
+        w.write_u8(10, 8); // black_level_offset
+        w.write_u8(20, 8); // white_level_offset
+        w.write_u8(30, 8); // shadow_gain_control
+        w.write_u8(40, 8); // highlight_gain_control
+        w.write_u8(50, 8); // mid_tone_width_adjustment_factor
+        w.write_u8(2, 4);  // tone_mapping_output_fine_tuning count = 2
+        w.write_u8(1, 4);  // saturation_gain count = 1
+        w.write_u8(11, 8); w.write_u8(22, 8); // ftm[0]: x, y
+        w.write_u8(33, 8); w.write_u8(44, 8); // ftm[1]: x, y
+        w.write_u8(55, 8); w.write_u8(66, 8); // sg[0]: x, y
+        let (buf, len) = w.finish();
+        let payload = buf[..len].to_vec();
+
+        let mut ftm = SlHdrTable15 { count: 2, ..Default::default() };
+        ftm.x[0] = 11; ftm.y[0] = 22;
+        ftm.x[1] = 33; ftm.y[1] = 44;
+        let mut sg = SlHdrTable15 { count: 1, ..Default::default() };
+        sg.x[0] = 55; sg.y[0] = 66;
+
+        let expected = SlHdrMetadata {
+            itu_t_t35_country_code: 0xB5,
+            terminal_provider_code: 0x003C,
+            terminal_provider_oriented_code_message_idc: 0x01,
+            sl_hdr_mode_value_minus1: 0,
+            sl_hdr_spec_major_version_idc: 1,
+            sl_hdr_spec_minor_version_idc: 0,
+            sl_hdr_cancel_flag: false,
+            body: Some(SlHdrBody {
+                sl_hdr_persistence_flag: true,
+                sl_hdr_payload_mode: 0,
+                original_picture_info: Some(SlHdrPictureInfo {
+                    primaries: 1,
+                    max_luminance: 1000,
+                    min_luminance: 5,
+                }),
+                target_picture_info: Some(SlHdrPictureInfo {
+                    primaries: 9,
+                    max_luminance: 400,
+                    min_luminance: 1,
+                }),
+                src_mdcv_info: Some(SlHdrMdcvInfo {
+                    primaries: [[100, 200], [300, 400], [500, 600]],
+                    ref_white_x: 700,
+                    ref_white_y: 800,
+                    max_mastering_luminance: 900,
+                    min_mastering_luminance: 10,
+                }),
+                matrix_coefficient_values: [1, 2, 3, 4],
+                chroma_to_luma_injection: [5, 6],
+                k_coefficient_values: [7, 8, 9],
+                payload: SlHdrPayload::Mode0(SlHdrMode0 {
+                    tone_mapping_input_signal_black_level_offset: 10,
+                    tone_mapping_input_signal_white_level_offset: 20,
+                    shadow_gain_control: 30,
+                    highlight_gain_control: 40,
+                    mid_tone_width_adjustment_factor: 50,
+                    tone_mapping_output_fine_tuning: ftm,
+                    saturation_gain: sg,
+                }),
+                extension: None,
+            }),
+        };
+        (payload, expected)
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn slhdr_full_body_decode() {
+        let (payload, expected) = make_slhdr_full_body_payload();
+        let got = SlHdrMetadata::decode(&payload, &mut |_| {}).unwrap();
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn slhdr_full_body_round_trip() {
+        use crate::encode::IntoPackets;
+        let (_, original) = make_slhdr_full_body_payload();
+        let frame = DynamicHdrInfoFrame::SlHdr(alloc::boxed::Box::new(original.clone()));
+        let pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
+        match decoded.value {
+            DynamicHdrInfoFrame::SlHdr(meta) => assert_eq!(*meta, original),
+            other => panic!("expected SlHdr, got {other:?}"),
+        }
+    }
 
     /// Build a minimal SL-HDR payload with `sl_hdr_cancel_flag = true`.
     #[cfg(any(feature = "alloc", feature = "std"))]
