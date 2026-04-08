@@ -1874,10 +1874,9 @@ mod tests {
             .collect();
         let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
         assert!(
-            decoded.iter_warnings().any(|w| matches!(
-                w,
-                DynamicHdrWarning::ReservedFieldNonZero { .. }
-            )),
+            decoded
+                .iter_warnings()
+                .any(|w| matches!(w, DynamicHdrWarning::ReservedFieldNonZero { .. })),
             "expected ReservedFieldNonZero warning to be forwarded"
         );
     }
