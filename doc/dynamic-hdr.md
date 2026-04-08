@@ -16,6 +16,13 @@ arm in `frame.rs` returns `InfoFrameIter(None)` and yields zero packets (marked 
 in a comment). `InfoFrameIter` is currently a thin wrapper around
 `Option<SinglePacketIter>` and cannot handle a multi-packet sequence at all.
 
+**Known stub behaviour to fix:**
+- `decode_sequence(&[])` currently returns `Ok(Unknown { format_id: 0 })`. An empty
+  slice is not a valid sequence; Phase 1 changes this to an error (see below).
+- `decode_sequence` does not validate that `seq_num` values are sequential, that
+  `total_bytes` is consistent across packets, or that `format_id` is consistent across
+  packets. Phase 1 adds warnings for all three.
+
 ---
 
 ## Phases
@@ -23,7 +30,9 @@ in a comment). `InfoFrameIter` is currently a thin wrapper around
 ### Phase 1 — `Unknown` catch-all with payload preservation
 
 **Goal**: change `DynamicHdrInfoFrame::Unknown` so that raw payload bytes are retained,
-making the variant re-encodable.
+making the variant re-encodable. Harden `decode_sequence` with integrity checks.
+
+#### 1a — `Unknown` variant payload field
 
 **Changes in `src/dynamic_hdr.rs`**:
 
@@ -47,19 +56,142 @@ Unknown {
 }
 ```
 
-Update `decode_sequence` to concatenate `chunk[..chunk_len]` from each packet into the
-`payload` field (alloc builds only).
-
 This is a **breaking change** to `DynamicHdrInfoFrame::Unknown`. The variant is
 `#[non_exhaustive]` so existing exhaustive matches already require a wildcard arm, but
 constructing `Unknown` by field will break. Release in the same version as the per-format
 structs (Phase 2/3) to batch breaking changes.
 
+#### 1b — `decode_sequence` loop refactor
+
+The current implementation does not extract chunk data from packets. The loop must be
+restructured to (a) validate the sequence and (b) accumulate chunk bytes into the payload.
+
+**Rewrite `decode_sequence` as follows:**
+
+1. **Empty-sequence guard**: if `packets.is_empty()`, return
+   `Err(DecodeError::EmptySequence)`. Add `EmptySequence` to `src/error.rs` — it is
+   `#[non_exhaustive]` so this is not a breaking change. Update the `error.rs` doc comment
+   to describe the new variant.
+
+2. **Read invariants from the first packet**: `format_id = packets[0][7]`,
+   `total_bytes = u16::from_le_bytes([packets[0][5], packets[0][6]])`.
+
+3. **Packet loop** (replacing the existing loop):
+
+   ```rust
+   for (i, packet) in packets.iter().enumerate() {
+       let length = packet[2];
+       if length > 27 {
+           return Err(DecodeError::Truncated { claimed: length });
+       }
+
+       // Checksum.
+       let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+       if sum != 0x00 {
+           let expected = crate::checksum::compute_checksum(
+               packet[..30].try_into().unwrap()
+           );
+           decoded.push_warning(DynamicHdrWarning::ChecksumMismatch {
+               expected,
+               found: packet[3],
+           });
+       }
+
+       // Sequence integrity.
+       let seq_num = packet[4];
+       if seq_num != i as u8 {
+           decoded.push_warning(DynamicHdrWarning::OutOfOrderPacket {
+               index: i as u8,
+               found: seq_num,
+           });
+       }
+       let pkt_total = u16::from_le_bytes([packet[5], packet[6]]);
+       if pkt_total != total_bytes {
+           decoded.push_warning(DynamicHdrWarning::InconsistentTotalBytes {
+               packet: i as u8,
+               expected: total_bytes,
+               found: pkt_total,
+           });
+       }
+       let pkt_fmt = packet[7];
+       if pkt_fmt != format_id {
+           decoded.push_warning(DynamicHdrWarning::InconsistentFormatId {
+               packet: i as u8,
+               expected: format_id,
+               found: pkt_fmt,
+           });
+       }
+
+       // Chunk accumulation (alloc builds only).
+       #[cfg(any(feature = "alloc", feature = "std"))]
+       {
+           let chunk_len = length.saturating_sub(4).min(23) as usize;
+           payload.extend_from_slice(&packet[8..8 + chunk_len]);
+       }
+   }
+   ```
+
+   `chunk_len = length.saturating_sub(4).min(23)` — same formula used by
+   `DynamicHdrFragment::decode`. `saturating_sub` guards against a `length` of 0–3
+   that would otherwise underflow.
+
+4. **Build the result**: dispatch on `format_id` (initially only `Unknown`; later Phase 2
+   adds `0x04`, Phase 3 adds `0x02`).
+
+#### 1c — New `DynamicHdrWarning` variants
+
+Add to `src/warn.rs` in `DynamicHdrWarning`:
+
+```rust
+/// A packet's `seq_num` field did not equal its position in the slice.
+///
+/// `index` is the packet's zero-based position in the `packets` slice;
+/// `found` is the `seq_num` value actually present in the packet.
+OutOfOrderPacket {
+    /// Zero-based position of the packet in the sequence.
+    index: u8,
+    /// The `seq_num` value found in the packet header.
+    found: u8,
+},
+/// A packet's `total_bytes` field differs from the first packet's value.
+///
+/// `total_bytes` must be identical across all packets in a sequence.
+InconsistentTotalBytes {
+    /// Zero-based index of the inconsistent packet.
+    packet: u8,
+    /// The value declared in the first packet.
+    expected: u16,
+    /// The value found in this packet.
+    found: u16,
+},
+/// A packet's `format_id` field differs from the first packet's value.
+///
+/// `format_id` must be identical across all packets in a sequence.
+InconsistentFormatId {
+    /// Zero-based index of the inconsistent packet.
+    packet: u8,
+    /// The value declared in the first packet.
+    expected: u8,
+    /// The value found in this packet.
+    found: u8,
+},
+```
+
 **Test additions** (`src/dynamic_hdr.rs` `#[cfg(test)]`):
+- `decode_sequence_empty_returns_error` — assert `decode_sequence(&[])` returns
+  `Err(DecodeError::EmptySequence)`. (Replaces the existing
+  `decode_sequence_empty_yields_unknown_zero` test.)
 - `decode_sequence_unknown_payload_assembled` — two-packet sequence with known chunk data;
-  assert the concatenated payload matches.
-- `decode_sequence_unknown_payload_roundtrip` — encode `Unknown { format_id, payload }`
-  via `IntoPackets` (Phase 4), decode back, assert fields equal.
+  assert the concatenated payload matches (alloc build).
+- `decode_sequence_out_of_order_seq_num_warning` — packet with `seq_num != index`;
+  assert `OutOfOrderPacket` warning.
+- `decode_sequence_inconsistent_total_bytes_warning` — two packets with differing
+  `total_bytes`; assert `InconsistentTotalBytes` warning.
+- `decode_sequence_inconsistent_format_id_warning` — two packets with differing
+  `format_id`; assert `InconsistentFormatId` warning.
+
+Note: the round-trip test (`decode_sequence_unknown_payload_roundtrip`) depends on
+`IntoPackets` and is added in Phase 4.
 
 ---
 
@@ -67,10 +199,14 @@ structs (Phase 2/3) to batch breaking changes.
 
 **Goal**: parse format identifier `0x04` (HDR10+, ETSI TS 103 433-1) into a typed struct.
 
-#### 2a — Bitstream reader utility
+#### 2a — Bitstream reader and writer utilities
 
 HDR10+ metadata is a dense bitstream; every field is packed with no byte alignment.
-Add a private `BitReader<'_>` struct in `src/dynamic_hdr.rs` (or `src/bitreader.rs`):
+Add private `BitReader<'_>` and `BitWriter` structs in `src/dynamic_hdr.rs`
+(or a new `src/bitreader.rs`). Both are needed before Phase 4 encoding; define them
+together to avoid a second module-level edit.
+
+**`BitReader`**:
 
 ```rust
 struct BitReader<'a> {
@@ -81,19 +217,41 @@ struct BitReader<'a> {
 
 impl<'a> BitReader<'a> {
     fn new(data: &'a [u8]) -> Self { ... }
-    fn read_u8(&mut self, bits: u8) -> Result<u8, DecodeError>  { ... }
+    fn read_u8(&mut self, bits: u8) -> Result<u8, DecodeError>   { ... }
     fn read_u16(&mut self, bits: u8) -> Result<u16, DecodeError> { ... }
     fn read_u32(&mut self, bits: u8) -> Result<u32, DecodeError> { ... }
-    fn read_bool(&mut self) -> Result<bool, DecodeError>         { ... }
-    fn remaining_bits(&self) -> usize                             { ... }
+    fn read_bool(&mut self) -> Result<bool, DecodeError>          { ... }
+    fn remaining_bits(&self) -> usize                              { ... }
 }
 ```
 
-ETSI TS 103 433-1 §6.1 specifies all fields in MSB-first bit order. The reader returns
-`DecodeError::Truncated` (or a new `DecodeError::MalformedPayload` — see design notes
-below) if the payload runs short.
+ETSI TS 103 433-1 §6.1 specifies all fields in MSB-first bit order. Returns
+`DecodeError::MalformedPayload` (see Design notes) when the payload runs short.
 
-A symmetric `BitWriter` is needed for Phase 4 encoding.
+**`BitWriter`**:
+
+```rust
+struct BitWriter {
+    buf: [u8; MAX_DYNAMIC_HDR_PAYLOAD],
+    byte_pos: usize,
+    bit_pos: u8,   // next bit to write within buf[byte_pos], MSB-first
+}
+
+impl BitWriter {
+    fn new() -> Self { ... }
+    fn write_u8(&mut self, value: u8, bits: u8)   { ... }
+    fn write_u16(&mut self, value: u16, bits: u8) { ... }
+    fn write_u32(&mut self, value: u32, bits: u8) { ... }
+    fn write_bool(&mut self, value: bool)          { ... }
+    /// Returns the populated slice of `buf`.
+    fn finish(self) -> ([u8; MAX_DYNAMIC_HDR_PAYLOAD], usize) { ... }
+}
+```
+
+`BitWriter` always writes into a fixed-size stack buffer (valid in all build
+configurations). Alloc builds convert the result into a `Vec<u8>` after `finish`.
+Panics on overflow (the caller is responsible for not exceeding `MAX_DYNAMIC_HDR_PAYLOAD`;
+this is guaranteed by the struct sizes).
 
 #### 2b — `Hdr10PlusMetadata` struct
 
@@ -119,11 +277,13 @@ pub struct Hdr10PlusMetadata {
 ///
 /// Stored as a fixed array with a count rather than a `Vec` to allow `no_std`
 /// without alloc.
+#[derive(Default)]
 pub struct Hdr10PlusWindows {
     pub count: u8,                         // 1..=3
     pub windows: [Hdr10PlusWindow; 3],     // only `windows[..count]` is valid
 }
 
+#[derive(Default)]
 pub struct Hdr10PlusWindow {
     pub upper_left_corner_x: u16,          // 16 bits
     pub upper_left_corner_y: u16,          // 16 bits
@@ -145,6 +305,7 @@ pub struct Hdr10PlusWindow {
     pub bezier_curve_anchors: BezierAnchors, // present if tone_mapping_flag
 }
 
+#[derive(Default)]
 pub struct DistributionMaxrgb {
     pub count: u8,                         // up to 15
     pub percentages: [u8; 15],             // 7 bits each
@@ -156,11 +317,13 @@ pub struct KneePoint {
     pub y: u16,                            // 12 bits
 }
 
+#[derive(Default)]
 pub struct BezierAnchors {
     pub count: u8,                         // up to 9
     pub anchors: [u16; 9],                 // 10 bits each
 }
 
+#[derive(Default)]
 pub struct ActualPeakLuminance {
     pub num_rows: u8,                      // 5 bits
     pub num_cols: u8,                      // 5 bits
@@ -170,19 +333,34 @@ pub struct ActualPeakLuminance {
 }
 ```
 
+Derive `Default` on all structs that appear inside `Hdr10PlusWindows` or as array
+elements, so that `Hdr10PlusWindows::default()` compiles without heap allocation. `KneePoint` does not need `Default` because it only appears inside `Option<KneePoint>`.
+
 Add `DynamicHdrInfoFrame::Hdr10Plus(Hdr10PlusMetadata)` variant.
 
 Update `decode_sequence` to dispatch on `format_id == 0x04` and call
 `Hdr10PlusMetadata::decode(payload: &[u8])`.
 
+**Reserved bits and unknown enum values**: ETSI TS 103 433-1 §6.1 defines several
+reserved bits (e.g. the two reserved bits following `application_mode`). During
+`Hdr10PlusMetadata::decode`, emit `DynamicHdrWarning::ReservedFieldNonZero { byte, bit }`
+for any reserved bit that is set. If `application_mode` carries a value outside {0, 1},
+emit `DynamicHdrWarning::UnknownEnumValue { field: "application_mode", raw }` and
+continue decoding using the raw value. This defines when `ReservedFieldNonZero` and
+`UnknownEnumValue` fire; without these rules they would be dead code.
+
 **Test additions**:
 - Unit tests for `BitReader` (exact bit counts, short-read error, MSB-first ordering).
+- Unit tests for `BitWriter` (write/read round-trip for each width, MSB-first ordering,
+  byte boundary alignment).
 - `hdr10plus_round_trip` — construct a `Hdr10PlusMetadata` with known field values,
   encode (Phase 4), decode, assert equality.
 - `hdr10plus_single_window_no_peak_lum` — minimal payload, no optional fields set.
 - `hdr10plus_three_windows_full` — all optional fields set, three windows.
 - `hdr10plus_malformed_short_payload_is_error` — payload too short to hold mandatory
-  fields; assert `DecodeError`.
+  fields; assert `DecodeError::MalformedPayload`.
+- `hdr10plus_reserved_bits_set_warning` — payload with reserved bits set; assert
+  `DynamicHdrWarning::ReservedFieldNonZero`.
 
 ---
 
@@ -225,18 +403,10 @@ dispatch on `format_id == 0x02`.
 
 #### 4a — Payload serialization
 
-Each variant serializes its metadata into a byte buffer. The `BitWriter` (introduced in
-Phase 2a) handles bit-level packing.
+Each variant serializes its metadata into a byte buffer using `BitWriter` (Phase 2a).
 
-For `no_std` without alloc: the maximum HDR10+ payload is bounded by the fixed-size
-struct (the largest case — three windows, all optional fields, max distribution points,
-max bezier anchors — is under 200 bytes). Compute the exact maximum at compile time and
-use a `[u8; MAX_DYNAMIC_HDR_PAYLOAD]` stack buffer. The `Unknown` variant cannot be
-encoded in bare `no_std` builds (no payload storage).
-
-For alloc builds: serialize into a `Vec<u8>`.
-
-#### 4b — `DynamicHdrIter`
+**`PayloadBuf` — feature-gated buffer type**: `DynamicHdrIter` stores the serialized
+payload in a field that differs by build configuration:
 
 ```rust
 pub struct DynamicHdrIter {
@@ -244,31 +414,68 @@ pub struct DynamicHdrIter {
     total_bytes: u16,
     offset: usize,
     seq_num: u8,
-    payload: PayloadBuf,  // feature-gated: Vec<u8> or [u8; MAX]; see above
+
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    payload: alloc::vec::Vec<u8>,
+
+    #[cfg(not(any(feature = "alloc", feature = "std")))]
+    payload: [u8; MAX_DYNAMIC_HDR_PAYLOAD],
+
+    /// Length of valid bytes in `payload` (bare `no_std` only; `Vec` tracks its own length).
+    #[cfg(not(any(feature = "alloc", feature = "std")))]
+    payload_len: usize,
 }
+```
+
+For alloc builds: `BitWriter::finish()` copies into a `Vec<u8>`.
+For bare `no_std` builds: the fixed `[u8; MAX_DYNAMIC_HDR_PAYLOAD]` buffer from
+`BitWriter::finish()` is moved directly into `DynamicHdrIter`. 600 bytes on the stack
+is acceptable in an embedded context.
+
+**`Unknown` in bare `no_std` builds**: `Unknown` has no `payload` field in bare `no_std`
+builds. `DynamicHdrInfoFrame::into_packets` must handle this:
+
+```rust
+DynamicHdrInfoFrame::Unknown { format_id, .. } => {
+    // No payload to encode in bare no_std builds.
+    // Return an iterator that yields zero packets.
+    // This preserves the existing behaviour of the Phase 3 stub.
+    Decoded::new(DynamicHdrIter::empty(format_id))
+}
+```
+
+In alloc builds `Unknown { format_id, payload }` encodes normally using the stored bytes.
+Document `DynamicHdrIter::empty` as a private constructor that sets `total_bytes = 0`
+and returns `None` immediately from `next`.
+
+#### 4b — `DynamicHdrIter::next` implementation
+
+**Wire layout for each emitted packet** (matches `DynamicHdrFragment::decode` offsets):
+
+```
+Byte  0:    type_code  = 0x20  (Dynamic HDR)
+Byte  1:    version    = 0x01
+Byte  2:    length     = 4 + chunk_len
+Byte  3:    checksum   (computed after filling all other bytes)
+Byte  4:    seq_num    (PB0)
+Bytes 5–6:  total_bytes little-endian (PB1–2)
+Byte  7:    format_id  (PB3)
+Bytes 8–30: chunk data (PB4–26; up to 23 bytes; remainder zero)
 ```
 
 `Iterator::next` implementation:
-1. If `offset >= total_bytes as usize`, return `None`.
-2. Take `chunk_len = (total_bytes as usize - offset).min(23)` bytes from
-   `payload[offset..]`.
-3. Build the packet header: `[0x20, 0x01, 4 + chunk_len as u8]`.
-4. Set `packet[4] = seq_num`, `packet[5..7] = total_bytes.to_le_bytes()`,
-   `packet[7] = format_id`.
-5. Copy chunk into `packet[8..8 + chunk_len]`.
-6. Compute and insert checksum at `packet[3]`.
-7. Advance `offset += chunk_len`, `seq_num += 1`.
-8. Return `Some(packet)`.
 
-`DynamicHdrInfoFrame` implements `IntoPackets`:
-```rust
-impl IntoPackets for DynamicHdrInfoFrame {
-    type Iter = DynamicHdrIter;
-    type Warning = DynamicHdrWarning;
-
-    fn into_packets(self) -> Decoded<DynamicHdrIter, DynamicHdrWarning> { ... }
-}
-```
+1. Compute `payload_len` (alloc: `payload.len()`; bare: `self.payload_len`).
+2. If `offset >= payload_len`, return `None`.
+3. `chunk_len = (payload_len - offset).min(23)`.
+4. Build `packet[0..3] = [0x20, 0x01, 4 + chunk_len as u8]`.
+5. `packet[4] = seq_num`.
+6. `packet[5..7] = total_bytes.to_le_bytes()`.
+7. `packet[7] = format_id`.
+8. `packet[8..8 + chunk_len]` ← `payload[offset..offset + chunk_len]`.
+9. `packet[3] = compute_checksum(&packet[..30])`.
+10. `offset += chunk_len; seq_num += 1`.
+11. Return `Some(packet)`.
 
 #### 4c — `InfoFrameIter` refactor
 
@@ -294,12 +501,28 @@ impl Iterator for InfoFrameIter {
 }
 ```
 
-Update the `InfoFrame::DynamicHdr` arm in `InfoFrame::into_packets` to use
-`InfoFrameIterInner::Dynamic`.
+Update the `InfoFrame::DynamicHdr` arm in `InfoFrame::into_packets`. This arm cannot use
+the `.wrap()` helper directly (the iterator type changes), so it must be written out
+explicitly:
+
+```rust
+InfoFrame::DynamicHdr(f) => {
+    let encoded = f.into_packets(); // Decoded<DynamicHdrIter, DynamicHdrWarning>
+    let mut out = Decoded::new(InfoFrameIter(InfoFrameIterInner::Dynamic(encoded.value)));
+    for w in encoded.iter_warnings() {
+        out.push_warning(Warning::DynamicHdr(w.clone()));
+    }
+    out
+}
+```
+
+`DynamicHdrWarning` must implement `Clone` for this (it already derives `Clone`).
 
 Remove the `// Phase 3` placeholder comment.
 
 **Test additions**:
+- `decode_sequence_unknown_payload_roundtrip` — encode `Unknown { format_id, payload }`
+  via `IntoPackets`, decode back with `decode_sequence`, assert fields equal (alloc build).
 - `dynamic_hdr_hdr10plus_encodes_correct_packet_count` — assert that a known
   `Hdr10PlusMetadata` produces `ceil(payload_len / 23)` packets.
 - `dynamic_hdr_hdr10plus_seq_nums_sequential` — assert `seq_num` is 0, 1, 2, … across
@@ -345,7 +568,9 @@ for the declared format is a different class of error. Options:
    packet-level truncation from format-level parse failure. Preferred; `DecodeError` is
    `#[non_exhaustive]` so this is not a breaking change.
 
-Recommendation: add `MalformedPayload` in Phase 2.
+Recommendation: add `MalformedPayload` in Phase 2, alongside `EmptySequence` from
+Phase 1. Both are format-level errors. Update the `error.rs` doc comment for
+`DecodeError` to describe both new variants.
 
 ### `no_std` payload buffer size
 
