@@ -156,6 +156,8 @@ mod tests {
     use crate::dynamic_hdr::DynamicHdrInfoFrame;
     use crate::hdmi_forum_vsi::HdmiForumVsi;
     use crate::hdr_static::{Eotf, HdrStaticInfoFrame, StaticMetadata, StaticMetadataType1};
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    use alloc::vec;
     use display_types::cea861::hdmi_forum::HdmiDscMaxSlices;
     use display_types::{ColorFormat, HdmiForumFrl};
 
@@ -255,8 +257,11 @@ mod tests {
 
     #[test]
     fn dynamic_hdr_variant_yields_no_packets() {
-        // Unknown variants cannot be re-encoded — payload bytes are not retained.
-        let frame = InfoFrame::DynamicHdr(DynamicHdrInfoFrame::Unknown { format_id: 0x04 });
+        let frame = InfoFrame::DynamicHdr(DynamicHdrInfoFrame::Unknown {
+            format_id: 0x04,
+            #[cfg(any(feature = "alloc", feature = "std"))]
+            payload: vec![],
+        });
         assert!(frame.into_packets().value.next().is_none());
     }
 

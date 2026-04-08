@@ -17,14 +17,18 @@ pub enum DynamicHdrInfoFrame {
     /// An unrecognised metadata format.
     ///
     /// Returned when the format identifier in the packet sequence is not
-    /// recognised by this version of `cartouche`. The raw payload is not
-    /// preserved; `format_id` identifies the format.
-    ///
-    /// Because the payload bytes are not retained, this variant cannot be
-    /// re-encoded via [`IntoPackets`](crate::encode::IntoPackets).
+    /// recognised by this version of `cartouche`. In `alloc`/`std` builds the
+    /// raw metadata bytes are retained in `payload`, making this variant
+    /// re-encodable. In bare `no_std` builds the payload is not retained.
     Unknown {
         /// The metadata format identifier from the first packet in the sequence.
         format_id: u8,
+        /// Raw metadata bytes concatenated from all chunks in the sequence.
+        ///
+        /// Only present in `alloc`/`std` builds. In bare `no_std` builds the
+        /// payload is not retained.
+        #[cfg(any(feature = "alloc", feature = "std"))]
+        payload: alloc::vec::Vec<u8>,
     },
 }
 
@@ -53,28 +57,76 @@ impl DynamicHdrInfoFrame {
     pub fn decode_sequence(
         packets: &[[u8; 31]],
     ) -> Result<Decoded<DynamicHdrInfoFrame, DynamicHdrWarning>, DecodeError> {
-        let mut decoded = Decoded::new(DynamicHdrInfoFrame::Unknown { format_id: 0 });
+        if packets.is_empty() {
+            return Err(DecodeError::EmptySequence);
+        }
 
-        for packet in packets {
+        // Read sequence-level invariants from the first packet.
+        let format_id = packets[0][7];
+        let total_bytes = u16::from_le_bytes([packets[0][5], packets[0][6]]);
+
+        let mut decoded = Decoded::new(DynamicHdrInfoFrame::Unknown {
+            format_id,
+            #[cfg(any(feature = "alloc", feature = "std"))]
+            payload: alloc::vec::Vec::new(),
+        });
+
+        #[cfg(any(feature = "alloc", feature = "std"))]
+        let mut payload: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+
+        for (i, packet) in packets.iter().enumerate() {
             let length = packet[2];
             if length > 27 {
                 return Err(DecodeError::Truncated { claimed: length });
             }
 
-            let total: u8 = packet.iter().fold(0u8, |acc, &b| acc.wrapping_add(b));
-            if total != 0x00 {
+            // Checksum.
+            let sum: u8 = packet.iter().fold(0u8, |acc, &b| acc.wrapping_add(b));
+            if sum != 0x00 {
                 let expected = crate::checksum::compute_checksum(packet[..30].try_into().unwrap());
                 decoded.push_warning(DynamicHdrWarning::ChecksumMismatch {
                     expected,
                     found: packet[3],
                 });
             }
+
+            // Sequence integrity.
+            let seq_num = packet[4];
+            if seq_num != i as u8 {
+                decoded.push_warning(DynamicHdrWarning::OutOfOrderPacket {
+                    index: i as u8,
+                    found: seq_num,
+                });
+            }
+            let pkt_total = u16::from_le_bytes([packet[5], packet[6]]);
+            if pkt_total != total_bytes {
+                decoded.push_warning(DynamicHdrWarning::InconsistentTotalBytes {
+                    packet: i as u8,
+                    expected: total_bytes,
+                    found: pkt_total,
+                });
+            }
+            let pkt_fmt = packet[7];
+            if pkt_fmt != format_id {
+                decoded.push_warning(DynamicHdrWarning::InconsistentFormatId {
+                    packet: i as u8,
+                    expected: format_id,
+                    found: pkt_fmt,
+                });
+            }
+
+            // Chunk accumulation.
+            // chunk_len = payload bytes after the 4-byte per-packet overhead, capped at 23.
+            #[cfg(any(feature = "alloc", feature = "std"))]
+            {
+                let chunk_len = length.saturating_sub(4).min(23) as usize;
+                payload.extend_from_slice(&packet[8..8 + chunk_len]);
+            }
         }
 
-        if let Some(first) = packets.first() {
-            // format_id lives at byte 7 (PB3) of every packet.
-            let format_id = first[7];
-            decoded.value = DynamicHdrInfoFrame::Unknown { format_id };
+        #[cfg(any(feature = "alloc", feature = "std"))]
+        {
+            decoded.value = DynamicHdrInfoFrame::Unknown { format_id, payload };
         }
 
         Ok(decoded)
@@ -184,6 +236,8 @@ impl DynamicHdrFragment {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    use alloc::vec;
 
     fn make_packet(seq_num: u8, total_bytes: u16, format_id: u8, chunk: &[u8]) -> [u8; 31] {
         let chunk_len = chunk.len().min(23) as u8;
@@ -265,33 +319,49 @@ mod tests {
     // --- decode_sequence tests ---
 
     #[test]
+    fn decode_sequence_empty_returns_error() {
+        assert!(matches!(
+            DynamicHdrInfoFrame::decode_sequence(&[]),
+            Err(DecodeError::EmptySequence)
+        ));
+    }
+
+    #[test]
     fn decode_sequence_single_packet_unknown_format() {
         let packet = make_packet(0, 23, 0x04, &[0xAAu8; 23]);
         let decoded = DynamicHdrInfoFrame::decode_sequence(&[packet]).unwrap();
         assert!(decoded.iter_warnings().next().is_none());
         assert_eq!(
             decoded.value,
-            DynamicHdrInfoFrame::Unknown { format_id: 0x04 }
+            DynamicHdrInfoFrame::Unknown {
+                format_id: 0x04,
+                #[cfg(any(feature = "alloc", feature = "std"))]
+                payload: vec![0xAAu8; 23],
+            }
         );
     }
 
     #[test]
-    fn decode_sequence_multi_packet_format_id_from_first() {
+    fn decode_sequence_multi_packet_payload_assembled() {
         let p0 = make_packet(0, 46, 0x04, &[0xAAu8; 23]);
         let p1 = make_packet(1, 46, 0x04, &[0xBBu8; 23]);
         let decoded = DynamicHdrInfoFrame::decode_sequence(&[p0, p1]).unwrap();
         assert!(decoded.iter_warnings().next().is_none());
-        assert_eq!(
-            decoded.value,
-            DynamicHdrInfoFrame::Unknown { format_id: 0x04 }
-        );
-    }
-
-    #[test]
-    fn decode_sequence_empty_yields_unknown_zero() {
-        let decoded = DynamicHdrInfoFrame::decode_sequence(&[]).unwrap();
-        assert!(decoded.iter_warnings().next().is_none());
-        assert_eq!(decoded.value, DynamicHdrInfoFrame::Unknown { format_id: 0 });
+        #[cfg(any(feature = "alloc", feature = "std"))]
+        {
+            let expected: alloc::vec::Vec<u8> = [0xAAu8; 23]
+                .iter()
+                .chain([0xBBu8; 23].iter())
+                .copied()
+                .collect();
+            assert_eq!(
+                decoded.value,
+                DynamicHdrInfoFrame::Unknown {
+                    format_id: 0x04,
+                    payload: expected,
+                }
+            );
+        }
     }
 
     #[test]
@@ -314,5 +384,51 @@ mod tests {
             DynamicHdrInfoFrame::decode_sequence(&[p0]),
             Err(DecodeError::Truncated { claimed: 28 })
         ));
+    }
+
+    #[test]
+    fn decode_sequence_out_of_order_seq_num_warning() {
+        // seq_num = 5 in a packet at index 0.
+        let mut p0 = make_packet(0, 23, 0x04, &[0u8; 23]);
+        p0[4] = 5;
+        // Recompute checksum after tampering.
+        let sum: u8 = p0.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        p0[3] = p0[3].wrapping_sub(sum);
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&[p0]).unwrap();
+        assert!(decoded.iter_warnings().any(|w| matches!(
+            w,
+            DynamicHdrWarning::OutOfOrderPacket { index: 0, found: 5 }
+        )));
+    }
+
+    #[test]
+    fn decode_sequence_inconsistent_total_bytes_warning() {
+        let p0 = make_packet(0, 46, 0x04, &[0u8; 23]);
+        // p1 declares a different total_bytes.
+        let p1 = make_packet(1, 99, 0x04, &[0u8; 23]);
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&[p0, p1]).unwrap();
+        assert!(decoded.iter_warnings().any(|w| matches!(
+            w,
+            DynamicHdrWarning::InconsistentTotalBytes {
+                packet: 1,
+                expected: 46,
+                found: 99,
+            }
+        )));
+    }
+
+    #[test]
+    fn decode_sequence_inconsistent_format_id_warning() {
+        let p0 = make_packet(0, 46, 0x04, &[0u8; 23]);
+        let p1 = make_packet(1, 46, 0x02, &[0u8; 23]);
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&[p0, p1]).unwrap();
+        assert!(decoded.iter_warnings().any(|w| matches!(
+            w,
+            DynamicHdrWarning::InconsistentFormatId {
+                packet: 1,
+                expected: 0x04,
+                found: 0x02,
+            }
+        )));
     }
 }

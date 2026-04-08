@@ -168,7 +168,10 @@ fn dynamic_hdr_fragment_decode() {
     let frame = DynamicHdrInfoFrame::decode_sequence(&[packet]).unwrap();
     assert_eq!(
         frame.value,
-        DynamicHdrInfoFrame::Unknown { format_id: 0x04 }
+        DynamicHdrInfoFrame::Unknown {
+            format_id: 0x04,
+            payload: (0u8..10).collect(),
+        }
     );
 
     println!(
