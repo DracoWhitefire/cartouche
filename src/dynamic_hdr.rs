@@ -1921,8 +1921,8 @@ mod tests {
         let mut w = BitWriter::new();
         w.write_u8(0x02, 8); // application_identifier
         w.write_u8(0x01, 8); // application_mode = 1 → scene_frame_switching_flag follows
-        w.write_bool(true);  // scene_frame_switching_flag
-        w.write_u8(0, 2);    // 2 reserved bits
+        w.write_bool(true); // scene_frame_switching_flag
+        w.write_u8(0, 2); // 2 reserved bits
         w.write_u32(2000, 27); // targeted_system_display_maximum_luminance
         // targeted_system_display_actual_peak_luminance: 2×2 table
         w.write_bool(true);
@@ -1935,28 +1935,28 @@ mod tests {
         // 1 window (stored as count − 1 = 0)
         w.write_u8(0, 2);
         // Window 0
-        w.write_u16(10, 16);  // upper_left_corner_x
-        w.write_u16(20, 16);  // upper_left_corner_y
+        w.write_u16(10, 16); // upper_left_corner_x
+        w.write_u16(20, 16); // upper_left_corner_y
         w.write_u16(200, 16); // lower_right_corner_x
         w.write_u16(300, 16); // lower_right_corner_y
         w.write_u16(100, 16); // center_of_ellipse_x
         w.write_u16(150, 16); // center_of_ellipse_y
-        w.write_u8(45, 8);    // rotation_angle
-        w.write_u16(50, 16);  // semimajor_axis_internal_ellipse
-        w.write_u16(60, 16);  // semimajor_axis_external_ellipse
-        w.write_u16(30, 16);  // semiminor_axis_external_ellipse
-        w.write_bool(true);   // overlap_process_option
+        w.write_u8(45, 8); // rotation_angle
+        w.write_u16(50, 16); // semimajor_axis_internal_ellipse
+        w.write_u16(60, 16); // semimajor_axis_external_ellipse
+        w.write_u16(30, 16); // semiminor_axis_external_ellipse
+        w.write_bool(true); // overlap_process_option
         w.write_u32(1000, 17); // maxscl[0]
         w.write_u32(2000, 17); // maxscl[1]
         w.write_u32(3000, 17); // maxscl[2]
-        w.write_u32(500, 17);  // average_maxrgb
+        w.write_u32(500, 17); // average_maxrgb
         // distribution_maxrgb: 2 entries
         w.write_u8(2, 4);
-        w.write_u8(25, 7);     // percentages[0]
-        w.write_u32(100, 17);  // percentiles[0]
-        w.write_u8(75, 7);     // percentages[1]
-        w.write_u32(800, 17);  // percentiles[1]
-        w.write_u16(512, 10);  // fraction_bright_pixels
+        w.write_u8(25, 7); // percentages[0]
+        w.write_u32(100, 17); // percentiles[0]
+        w.write_u8(75, 7); // percentages[1]
+        w.write_u32(800, 17); // percentiles[1]
+        w.write_u16(512, 10); // fraction_bright_pixels
         // mastering_display_actual_peak_luminance: 1×1 table
         w.write_bool(true);
         w.write_u8(1, 5); // num_rows
@@ -1966,7 +1966,7 @@ mod tests {
         w.write_bool(true);
         w.write_u16(100, 12); // knee_point.x
         w.write_u16(200, 12); // knee_point.y
-        w.write_u8(2, 4);     // num_anchors
+        w.write_u8(2, 4); // num_anchors
         w.write_u16(300, 10); // anchors[0]
         w.write_u16(400, 10); // anchors[1]
         // color_saturation_mapping_flag=true + weight
@@ -2220,47 +2220,74 @@ mod tests {
         w.write_u8(0, 7); // sl_hdr_spec_minor_version_idc
         w.write_bool(false); // sl_hdr_cancel_flag
         // Body flags — all optional blocks present, mode 0
-        w.write_bool(true);  // sl_hdr_persistence_flag
-        w.write_bool(true);  // original_picture_info_present_flag
-        w.write_bool(true);  // target_picture_info_present_flag
-        w.write_bool(true);  // src_mdcv_info_present_flag
+        w.write_bool(true); // sl_hdr_persistence_flag
+        w.write_bool(true); // original_picture_info_present_flag
+        w.write_bool(true); // target_picture_info_present_flag
+        w.write_bool(true); // src_mdcv_info_present_flag
         w.write_bool(false); // sl_hdr_extension_present_flag
-        w.write_u8(0, 3);    // sl_hdr_payload_mode = 0
+        w.write_u8(0, 3); // sl_hdr_payload_mode = 0
         // original_picture_info
-        w.write_u8(1, 8);      w.write_u16(1000, 16); w.write_u16(5, 16);
+        w.write_u8(1, 8);
+        w.write_u16(1000, 16);
+        w.write_u16(5, 16);
         // target_picture_info
-        w.write_u8(9, 8);      w.write_u16(400, 16);  w.write_u16(1, 16);
+        w.write_u8(9, 8);
+        w.write_u16(400, 16);
+        w.write_u16(1, 16);
         // src_mdcv_info: primaries (3 × x,y), ref_white, mastering luminance
-        w.write_u16(100, 16); w.write_u16(200, 16); // primaries[0]
-        w.write_u16(300, 16); w.write_u16(400, 16); // primaries[1]
-        w.write_u16(500, 16); w.write_u16(600, 16); // primaries[2]
-        w.write_u16(700, 16); w.write_u16(800, 16); // ref_white_x, ref_white_y
-        w.write_u16(900, 16); w.write_u16(10, 16);  // max/min mastering luminance
+        w.write_u16(100, 16);
+        w.write_u16(200, 16); // primaries[0]
+        w.write_u16(300, 16);
+        w.write_u16(400, 16); // primaries[1]
+        w.write_u16(500, 16);
+        w.write_u16(600, 16); // primaries[2]
+        w.write_u16(700, 16);
+        w.write_u16(800, 16); // ref_white_x, ref_white_y
+        w.write_u16(900, 16);
+        w.write_u16(10, 16); // max/min mastering luminance
         // matrix_coefficient_values (4 × 16)
-        for v in [1u16, 2, 3, 4] { w.write_u16(v, 16); }
+        for v in [1u16, 2, 3, 4] {
+            w.write_u16(v, 16);
+        }
         // chroma_to_luma_injection (2 × 16)
-        for v in [5u16, 6] { w.write_u16(v, 16); }
+        for v in [5u16, 6] {
+            w.write_u16(v, 16);
+        }
         // k_coefficient_values (3 × 8)
-        for v in [7u8, 8, 9] { w.write_u8(v, 8); }
+        for v in [7u8, 8, 9] {
+            w.write_u8(v, 8);
+        }
         // Mode 0: five scalars, then ftm_count(4), sg_count(4), ftm entries, sg entries
         w.write_u8(10, 8); // black_level_offset
         w.write_u8(20, 8); // white_level_offset
         w.write_u8(30, 8); // shadow_gain_control
         w.write_u8(40, 8); // highlight_gain_control
         w.write_u8(50, 8); // mid_tone_width_adjustment_factor
-        w.write_u8(2, 4);  // tone_mapping_output_fine_tuning count = 2
-        w.write_u8(1, 4);  // saturation_gain count = 1
-        w.write_u8(11, 8); w.write_u8(22, 8); // ftm[0]: x, y
-        w.write_u8(33, 8); w.write_u8(44, 8); // ftm[1]: x, y
-        w.write_u8(55, 8); w.write_u8(66, 8); // sg[0]: x, y
+        w.write_u8(2, 4); // tone_mapping_output_fine_tuning count = 2
+        w.write_u8(1, 4); // saturation_gain count = 1
+        w.write_u8(11, 8);
+        w.write_u8(22, 8); // ftm[0]: x, y
+        w.write_u8(33, 8);
+        w.write_u8(44, 8); // ftm[1]: x, y
+        w.write_u8(55, 8);
+        w.write_u8(66, 8); // sg[0]: x, y
         let (buf, len) = w.finish();
         let payload = buf[..len].to_vec();
 
-        let mut ftm = SlHdrTable15 { count: 2, ..Default::default() };
-        ftm.x[0] = 11; ftm.y[0] = 22;
-        ftm.x[1] = 33; ftm.y[1] = 44;
-        let mut sg = SlHdrTable15 { count: 1, ..Default::default() };
-        sg.x[0] = 55; sg.y[0] = 66;
+        let mut ftm = SlHdrTable15 {
+            count: 2,
+            ..Default::default()
+        };
+        ftm.x[0] = 11;
+        ftm.y[0] = 22;
+        ftm.x[1] = 33;
+        ftm.y[1] = 44;
+        let mut sg = SlHdrTable15 {
+            count: 1,
+            ..Default::default()
+        };
+        sg.x[0] = 55;
+        sg.y[0] = 66;
 
         let expected = SlHdrMetadata {
             itu_t_t35_country_code: 0xB5,
@@ -2396,6 +2423,110 @@ mod tests {
         let meta = SlHdrMetadata::decode(&payload, &mut |_| {}).unwrap();
         assert!(meta.sl_hdr_cancel_flag);
         assert!(meta.body.is_none());
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn slhdr_unknown_payload_mode_warning() {
+        // Build a minimal SL-HDR body with sl_hdr_payload_mode = 7 (unknown).
+        let mut w = BitWriter::new();
+        w.write_u8(0xB5, 8);
+        w.write_u16(0x003C, 16);
+        w.write_u8(0x01, 8);
+        w.write_u8(0, 4);
+        w.write_u8(1, 4);
+        w.write_u8(0, 7);
+        w.write_bool(false); // sl_hdr_cancel_flag
+        w.write_bool(false); // sl_hdr_persistence_flag
+        w.write_bool(false); // original_picture_info_present_flag
+        w.write_bool(false); // target_picture_info_present_flag
+        w.write_bool(false); // src_mdcv_info_present_flag
+        w.write_bool(false); // sl_hdr_extension_present_flag
+        w.write_u8(7, 3); // sl_hdr_payload_mode = 7 (unknown)
+        // matrix, chroma, k all zero
+        for _ in 0..4 {
+            w.write_u16(0, 16);
+        }
+        for _ in 0..2 {
+            w.write_u16(0, 16);
+        }
+        for _ in 0..3 {
+            w.write_u8(0, 8);
+        }
+        // No mode-specific bits for unknown mode.
+        let (buf, len) = w.finish();
+        let payload = &buf[..len];
+
+        let mut warnings = alloc::vec::Vec::new();
+        let meta = SlHdrMetadata::decode(payload, &mut |w| warnings.push(w)).unwrap();
+        assert!(warnings.iter().any(|w| matches!(
+            w,
+            DynamicHdrWarning::UnknownEnumValue {
+                field: "sl_hdr_payload_mode",
+                raw: 7
+            }
+        )));
+        let body = meta.body.as_ref().unwrap();
+        assert!(matches!(body.payload, SlHdrPayload::Unknown(7)));
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn slhdr_extension_round_trip() {
+        use crate::encode::IntoPackets;
+
+        // Build mode-0 payload with extension_present=true, 2 extension bytes.
+        let mut w = BitWriter::new();
+        w.write_u8(0xB5, 8);
+        w.write_u16(0x003C, 16);
+        w.write_u8(0x01, 8);
+        w.write_u8(0, 4);
+        w.write_u8(1, 4);
+        w.write_u8(0, 7);
+        w.write_bool(false); // sl_hdr_cancel_flag
+        w.write_bool(false); // sl_hdr_persistence_flag
+        w.write_bool(false); // original_picture_info_present_flag
+        w.write_bool(false); // target_picture_info_present_flag
+        w.write_bool(false); // src_mdcv_info_present_flag
+        w.write_bool(true); // sl_hdr_extension_present_flag
+        w.write_u8(0, 3); // sl_hdr_payload_mode = 0
+        for _ in 0..4 {
+            w.write_u16(0, 16);
+        } // matrix
+        for _ in 0..2 {
+            w.write_u16(0, 16);
+        } // chroma
+        for _ in 0..3 {
+            w.write_u8(0, 8);
+        } // k
+        // Mode 0: all zero, empty tables
+        w.write_u8(0, 8);
+        w.write_u8(0, 8);
+        w.write_u8(0, 8);
+        w.write_u8(0, 8);
+        w.write_u8(0, 8);
+        w.write_u8(0, 4);
+        w.write_u8(0, 4); // ftm_count=0, sg_count=0
+        // Extension block
+        w.write_u8(0x3F, 6); // extension_6bits
+        w.write_u16(2, 10); // length = 2
+        w.write_u8(0xAB, 8); // data[0]
+        w.write_u8(0xCD, 8); // data[1]
+        let (buf, len) = w.finish();
+        let payload = buf[..len].to_vec();
+
+        let original = SlHdrMetadata::decode(&payload, &mut |_| {}).unwrap();
+        let ext = original.body.as_ref().unwrap().extension.as_ref().unwrap();
+        assert_eq!(ext.extension_6bits, 0x3F);
+        assert_eq!(ext.data, alloc::vec![0xAB, 0xCD]);
+
+        let frame = DynamicHdrInfoFrame::SlHdr(alloc::boxed::Box::new(original.clone()));
+        let pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
+        match decoded.value {
+            DynamicHdrInfoFrame::SlHdr(meta) => assert_eq!(*meta, original),
+            other => panic!("expected SlHdr, got {other:?}"),
+        }
     }
 
     #[test]
