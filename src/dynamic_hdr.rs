@@ -689,8 +689,14 @@ impl Hdr10PlusMetadata {
                 None
             };
 
-        // num_windows is stored as (count − 1) in 2 bits, giving 1–3 windows.
-        let num_windows = r.read_u8(2)? + 1;
+        // num_windows is stored as (count − 1) in 2 bits. Raw values 0–2 give
+        // 1–3 windows; raw value 3 (4 windows) exceeds the array capacity and
+        // is rejected as a malformed payload.
+        let num_windows_minus1 = r.read_u8(2)?;
+        if num_windows_minus1 > 2 {
+            return Err(DecodeError::MalformedPayload);
+        }
+        let num_windows = num_windows_minus1 + 1;
         let mut windows = Hdr10PlusWindows {
             count: num_windows,
             ..Default::default()
@@ -2199,6 +2205,26 @@ mod tests {
         // Truncated mid-stream must also fail.
         assert!(matches!(
             Hdr10PlusMetadata::decode(&[0x01, 0x00], &mut |_| {}),
+            Err(DecodeError::MalformedPayload)
+        ));
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn hdr10plus_four_windows_is_malformed() {
+        // Build a payload with num_windows_minus1 = 3 (raw), which would imply
+        // 4 windows — beyond the 3-slot array capacity. Must return MalformedPayload,
+        // not panic with an index-out-of-bounds.
+        let mut w = BitWriter::new();
+        w.write_u8(0x01, 8); // application_identifier
+        w.write_u8(0x00, 8); // application_mode
+        w.write_u8(0, 2);    // reserved bits
+        w.write_u32(1000, 27); // targeted_system_display_maximum_luminance
+        w.write_bool(false); // targeted_system_display_actual_peak_luminance_flag
+        w.write_u8(3, 2);    // num_windows_minus1 = 3 → 4 windows (out of range)
+        let (buf, len) = w.finish();
+        assert!(matches!(
+            Hdr10PlusMetadata::decode(&buf[..len], &mut |_| {}),
             Err(DecodeError::MalformedPayload)
         ));
     }
