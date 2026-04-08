@@ -2159,6 +2159,71 @@ mod tests {
         assert!(matches!(decoded.value, DynamicHdrInfoFrame::SlHdr(_)));
     }
 
+    /// Build a minimal SL-HDR mode-1 payload: 2 luminance-mapping entries
+    /// (non-uniform) and 1 colour-correction entry (uniform, so no x values).
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn make_slhdr_mode1_payload() -> alloc::vec::Vec<u8> {
+        let mut w = BitWriter::new();
+        // Header
+        w.write_u8(0xB5, 8);
+        w.write_u16(0x003C, 16);
+        w.write_u8(0x01, 8);
+        w.write_u8(0, 4); // sl_hdr_mode_value_minus1
+        w.write_u8(1, 4); // sl_hdr_spec_major_version_idc
+        w.write_u8(0, 7); // sl_hdr_spec_minor_version_idc
+        w.write_bool(false); // sl_hdr_cancel_flag = false
+        // Body flags
+        w.write_bool(true); // sl_hdr_persistence_flag
+        w.write_bool(false); // original_picture_info_present_flag
+        w.write_bool(false); // target_picture_info_present_flag
+        w.write_bool(false); // src_mdcv_info_present_flag
+        w.write_bool(false); // sl_hdr_extension_present_flag
+        w.write_u8(1, 3); // sl_hdr_payload_mode = 1
+        // matrix_coefficient_values (4 × 16)
+        for _ in 0..4 {
+            w.write_u16(0, 16);
+        }
+        // chroma_to_luma_injection (2 × 16)
+        for _ in 0..2 {
+            w.write_u16(0, 16);
+        }
+        // k_coefficient_values (3 × 8)
+        for _ in 0..3 {
+            w.write_u8(0, 8);
+        }
+        // Mode 1: luminance_mapping — non-uniform, 2 entries
+        w.write_bool(false); // lm_uniform_sampling_flag = false
+        w.write_u8(2, 7); // lm_count = 2
+        w.write_u16(100, 16); // x[0]
+        w.write_u16(200, 16); // y[0]
+        w.write_u16(300, 16); // x[1]
+        w.write_u16(400, 16); // y[1]
+        // Mode 1: colour_correction — uniform, 1 entry
+        w.write_bool(true); // cc_uniform_sampling_flag = true
+        w.write_u8(1, 7); // cc_count = 1
+        w.write_u16(500, 16); // y[0] only (no x for uniform)
+        let (buf, len) = w.finish();
+        buf[..len].to_vec()
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn slhdr_mode1_round_trip() {
+        use crate::encode::IntoPackets;
+
+        let payload = make_slhdr_mode1_payload();
+        let original = SlHdrMetadata::decode(&payload, &mut |_| {}).unwrap();
+        let frame = DynamicHdrInfoFrame::SlHdr(alloc::boxed::Box::new(original.clone()));
+
+        let pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
+
+        match decoded.value {
+            DynamicHdrInfoFrame::SlHdr(meta) => assert_eq!(*meta, original),
+            other => panic!("expected SlHdr, got {other:?}"),
+        }
+    }
+
     #[test]
     #[cfg(any(feature = "alloc", feature = "std"))]
     fn slhdr_mode0_round_trip() {
