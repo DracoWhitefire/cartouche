@@ -2275,6 +2275,25 @@ mod tests {
 
     #[test]
     #[cfg(any(feature = "alloc", feature = "std"))]
+    fn hdr10plus_unknown_application_mode_warning() {
+        // application_mode=2 is unknown (spec defines 0 and 1 only).
+        // Decode must succeed and emit UnknownEnumValue; no scene_frame_switching_flag
+        // bit is consumed (same as mode 0).
+        let (mut payload, _) = make_minimal_hdr10plus_payload();
+        payload[1] = 0x02; // overwrite application_mode byte
+        let mut warnings = alloc::vec::Vec::new();
+        Hdr10PlusMetadata::decode(&payload, &mut |w| warnings.push(w)).unwrap();
+        assert!(warnings.iter().any(|w| matches!(
+            w,
+            DynamicHdrWarning::UnknownEnumValue {
+                field: "application_mode",
+                raw: 2
+            }
+        )));
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
     fn hdr10plus_reserved_bits_set_warning() {
         let (mut payload, _) = make_minimal_hdr10plus_payload();
         // The two reserved bits follow byte 1 (application_mode) at bits 6 and 5
