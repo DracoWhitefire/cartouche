@@ -1129,6 +1129,125 @@ impl SlHdrMetadata {
             colour_correction,
         })
     }
+
+    /// Serialize this metadata to a byte buffer using `BitWriter`.
+    ///
+    /// Returns `(buf, len)` — the populated prefix of `buf`.
+    pub(crate) fn encode(&self) -> ([u8; MAX_DYNAMIC_HDR_PAYLOAD], usize) {
+        let mut w = BitWriter::new();
+
+        w.write_u8(self.itu_t_t35_country_code, 8);
+        w.write_u16(self.terminal_provider_code, 16);
+        w.write_u8(self.terminal_provider_oriented_code_message_idc, 8);
+        w.write_u8(self.sl_hdr_mode_value_minus1, 4);
+        w.write_u8(self.sl_hdr_spec_major_version_idc, 4);
+        w.write_u8(self.sl_hdr_spec_minor_version_idc, 7);
+        w.write_bool(self.sl_hdr_cancel_flag);
+
+        if let Some(ref body) = self.body {
+            Self::encode_body(&mut w, body);
+        }
+
+        w.finish()
+    }
+
+    fn encode_body(w: &mut BitWriter, body: &SlHdrBody) {
+        w.write_bool(body.sl_hdr_persistence_flag);
+        w.write_bool(body.original_picture_info.is_some());
+        w.write_bool(body.target_picture_info.is_some());
+        w.write_bool(body.src_mdcv_info.is_some());
+        #[cfg(any(feature = "alloc", feature = "std"))]
+        w.write_bool(body.extension.is_some());
+        #[cfg(not(any(feature = "alloc", feature = "std")))]
+        w.write_bool(false); // no extension storage in bare no_std
+        w.write_u8(body.sl_hdr_payload_mode, 3);
+
+        if let Some(ref info) = body.original_picture_info {
+            w.write_u8(info.primaries, 8);
+            w.write_u16(info.max_luminance, 16);
+            w.write_u16(info.min_luminance, 16);
+        }
+        if let Some(ref info) = body.target_picture_info {
+            w.write_u8(info.primaries, 8);
+            w.write_u16(info.max_luminance, 16);
+            w.write_u16(info.min_luminance, 16);
+        }
+        if let Some(ref mdcv) = body.src_mdcv_info {
+            for component in mdcv.primaries.iter() {
+                w.write_u16(component[0], 16);
+                w.write_u16(component[1], 16);
+            }
+            w.write_u16(mdcv.ref_white_x, 16);
+            w.write_u16(mdcv.ref_white_y, 16);
+            w.write_u16(mdcv.max_mastering_luminance, 16);
+            w.write_u16(mdcv.min_mastering_luminance, 16);
+        }
+
+        for &v in body.matrix_coefficient_values.iter() {
+            w.write_u16(v, 16);
+        }
+        for &v in body.chroma_to_luma_injection.iter() {
+            w.write_u16(v, 16);
+        }
+        for &v in body.k_coefficient_values.iter() {
+            w.write_u8(v, 8);
+        }
+
+        match &body.payload {
+            SlHdrPayload::Mode0(m) => Self::encode_mode0(w, m),
+            #[cfg(any(feature = "alloc", feature = "std"))]
+            SlHdrPayload::Mode1(m) => Self::encode_mode1(w, m),
+            SlHdrPayload::Unknown(_) => {} // no bits to write for unknown mode
+        }
+
+        // GamutMappingEnabledFlag is always treated as false; no gamut block written.
+
+        #[cfg(any(feature = "alloc", feature = "std"))]
+        if let Some(ref ext) = body.extension {
+            w.write_u8(ext.extension_6bits, 6);
+            w.write_u16(ext.data.len() as u16, 10);
+            for &byte in ext.data.iter() {
+                w.write_u8(byte, 8);
+            }
+        }
+    }
+
+    fn encode_mode0(w: &mut BitWriter, m: &SlHdrMode0) {
+        w.write_u8(m.tone_mapping_input_signal_black_level_offset, 8);
+        w.write_u8(m.tone_mapping_input_signal_white_level_offset, 8);
+        w.write_u8(m.shadow_gain_control, 8);
+        w.write_u8(m.highlight_gain_control, 8);
+        w.write_u8(m.mid_tone_width_adjustment_factor, 8);
+        w.write_u8(m.tone_mapping_output_fine_tuning.count, 4);
+        w.write_u8(m.saturation_gain.count, 4);
+        for i in 0..m.tone_mapping_output_fine_tuning.count as usize {
+            w.write_u8(m.tone_mapping_output_fine_tuning.x[i], 8);
+            w.write_u8(m.tone_mapping_output_fine_tuning.y[i], 8);
+        }
+        for i in 0..m.saturation_gain.count as usize {
+            w.write_u8(m.saturation_gain.x[i], 8);
+            w.write_u8(m.saturation_gain.y[i], 8);
+        }
+    }
+
+    fn encode_mode1(w: &mut BitWriter, m: &SlHdrMode1) {
+        w.write_bool(m.lm_uniform_sampling_flag);
+        w.write_u8(m.luminance_mapping.count, 7);
+        for i in 0..m.luminance_mapping.count as usize {
+            if !m.lm_uniform_sampling_flag {
+                w.write_u16(m.luminance_mapping.x[i], 16);
+            }
+            w.write_u16(m.luminance_mapping.y[i], 16);
+        }
+        w.write_bool(m.cc_uniform_sampling_flag);
+        w.write_u8(m.colour_correction.count, 7);
+        for i in 0..m.colour_correction.count as usize {
+            if !m.cc_uniform_sampling_flag {
+                w.write_u16(m.colour_correction.x[i], 16);
+            }
+            w.write_u16(m.colour_correction.y[i], 16);
+        }
+    }
 }
 
 /// Iterator that yields 31-byte wire packets for a [`DynamicHdrInfoFrame`].
@@ -1238,14 +1357,16 @@ impl IntoPackets for DynamicHdrInfoFrame {
                 })
             }
             #[cfg(any(feature = "alloc", feature = "std"))]
-            DynamicHdrInfoFrame::SlHdr(_) => {
-                // Encoding not yet implemented.
+            DynamicHdrInfoFrame::SlHdr(meta) => {
+                let (buf, len) = meta.encode();
+                let payload = buf[..len].to_vec();
+                let total_bytes = len as u16;
                 Decoded::new(DynamicHdrIter {
                     format_id: 0x02,
-                    total_bytes: 0,
+                    total_bytes,
                     offset: 0,
                     seq_num: 0,
-                    payload: alloc::vec::Vec::new(),
+                    payload,
                 })
             }
         }
@@ -2036,5 +2157,23 @@ mod tests {
             .collect();
         let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
         assert!(matches!(decoded.value, DynamicHdrInfoFrame::SlHdr(_)));
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn slhdr_mode0_round_trip() {
+        use crate::encode::IntoPackets;
+
+        let payload = make_slhdr_mode0_payload();
+        let original = SlHdrMetadata::decode(&payload, &mut |_| {}).unwrap();
+        let frame = DynamicHdrInfoFrame::SlHdr(alloc::boxed::Box::new(original.clone()));
+
+        let pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
+
+        match decoded.value {
+            DynamicHdrInfoFrame::SlHdr(meta) => assert_eq!(*meta, original),
+            other => panic!("expected SlHdr, got {other:?}"),
+        }
     }
 }
