@@ -1,7 +1,7 @@
 use crate::audio::AudioInfoFrame;
 use crate::avi::AviInfoFrame;
 use crate::decoded::Decoded;
-use crate::dynamic_hdr::{DynamicHdrFragment, DynamicHdrInfoFrame};
+use crate::dynamic_hdr::{DynamicHdrFragment, DynamicHdrInfoFrame, DynamicHdrIter};
 use crate::encode::{IntoPackets, SinglePacketIter};
 use crate::hdmi_forum_vsi::HdmiForumVsi;
 use crate::hdr_static::HdrStaticInfoFrame;
@@ -90,15 +90,23 @@ pub enum InfoFramePacket {
 /// Iterator returned by [`IntoPackets`] for [`InfoFrame`].
 ///
 /// Yields a single 31-byte packet for all traditional InfoFrame types.
-/// [`InfoFrame::DynamicHdr`] currently yields no packets (Phase 3 encoding
-/// is not yet implemented).
-pub struct InfoFrameIter(Option<SinglePacketIter>);
+/// [`InfoFrame::DynamicHdr`] yields as many packets as the metadata payload
+/// requires (one per 23-byte chunk).
+pub struct InfoFrameIter(InfoFrameIterInner);
+
+enum InfoFrameIterInner {
+    Single(Option<SinglePacketIter>),
+    Dynamic(DynamicHdrIter),
+}
 
 impl Iterator for InfoFrameIter {
     type Item = [u8; 31];
 
     fn next(&mut self) -> Option<[u8; 31]> {
-        self.0.as_mut()?.next()
+        match &mut self.0 {
+            InfoFrameIterInner::Single(s) => s.as_mut()?.next(),
+            InfoFrameIterInner::Dynamic(d) => d.next(),
+        }
     }
 }
 
@@ -108,19 +116,26 @@ impl IntoPackets for InfoFrame {
 
     fn into_packets(self) -> Decoded<InfoFrameIter, Warning> {
         match self {
-            InfoFrame::Avi(f) => f
-                .into_packets()
-                .wrap(|iter| InfoFrameIter(Some(iter)), Warning::Avi),
-            InfoFrame::Audio(f) => f
-                .into_packets()
-                .wrap(|iter| InfoFrameIter(Some(iter)), Warning::Audio),
-            InfoFrame::HdrStatic(f) => f
-                .into_packets()
-                .wrap(|iter| InfoFrameIter(Some(iter)), Warning::HdrStatic),
-            InfoFrame::HdmiForumVsi(f) => f
-                .into_packets()
-                .wrap(|iter| InfoFrameIter(Some(iter)), Warning::HdmiForumVsi),
-            InfoFrame::DynamicHdr(_) => Decoded::new(InfoFrameIter(None)), // Phase 3
+            InfoFrame::Avi(f) => f.into_packets().wrap(
+                |iter| InfoFrameIter(InfoFrameIterInner::Single(Some(iter))),
+                Warning::Avi,
+            ),
+            InfoFrame::Audio(f) => f.into_packets().wrap(
+                |iter| InfoFrameIter(InfoFrameIterInner::Single(Some(iter))),
+                Warning::Audio,
+            ),
+            InfoFrame::HdrStatic(f) => f.into_packets().wrap(
+                |iter| InfoFrameIter(InfoFrameIterInner::Single(Some(iter))),
+                Warning::HdrStatic,
+            ),
+            InfoFrame::HdmiForumVsi(f) => f.into_packets().wrap(
+                |iter| InfoFrameIter(InfoFrameIterInner::Single(Some(iter))),
+                Warning::HdmiForumVsi,
+            ),
+            InfoFrame::DynamicHdr(f) => f.into_packets().wrap(
+                |iter| InfoFrameIter(InfoFrameIterInner::Dynamic(iter)),
+                Warning::DynamicHdr,
+            ),
             InfoFrame::Unknown {
                 type_code,
                 version,
@@ -136,7 +151,9 @@ impl IntoPackets for InfoFrame {
                 packet[..3].copy_from_slice(&hp[..3]);
                 packet[3] = checksum;
                 packet[4..].copy_from_slice(&hp[3..]);
-                Decoded::new(InfoFrameIter(Some(SinglePacketIter::new(packet))))
+                Decoded::new(InfoFrameIter(InfoFrameIterInner::Single(Some(
+                    SinglePacketIter::new(packet),
+                ))))
             }
         }
     }
@@ -256,13 +273,35 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_hdr_variant_yields_no_packets() {
+    fn dynamic_hdr_empty_payload_yields_no_packets() {
         let frame = InfoFrame::DynamicHdr(DynamicHdrInfoFrame::Unknown {
             format_id: 0x04,
             #[cfg(any(feature = "alloc", feature = "std"))]
             payload: vec![],
         });
         assert!(frame.into_packets().value.next().is_none());
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn info_frame_dynamic_hdr_round_trip() {
+        let original_payload: alloc::vec::Vec<u8> = (0u8..30).collect();
+        let frame = InfoFrame::DynamicHdr(DynamicHdrInfoFrame::Unknown {
+            format_id: 0x0A,
+            payload: original_payload.clone(),
+        });
+        let packets: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
+        // 30 bytes → 2 packets (23 + 7)
+        assert_eq!(packets.len(), 2);
+        assert_eq!(packets[0][0], 0x20); // Dynamic HDR type code
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&packets).unwrap();
+        assert_eq!(
+            decoded.value,
+            DynamicHdrInfoFrame::Unknown {
+                format_id: 0x0A,
+                payload: original_payload,
+            }
+        );
     }
 
     #[test]
