@@ -11,6 +11,85 @@ use crate::warn::DynamicHdrWarning;
 /// builds where heap allocation is unavailable.
 pub(crate) const MAX_DYNAMIC_HDR_PAYLOAD: usize = 600;
 
+/// MSB-first bit-stream reader.
+///
+/// Used to parse HDR10+ and SL-HDR payloads, whose fields are bit-packed
+/// with no byte alignment (ETSI TS 103 433-1 §6.1).
+struct BitReader<'a> {
+    data: &'a [u8],
+    /// Index of the byte currently being read.
+    byte_pos: usize,
+    /// Next bit to read within `data[byte_pos]`, counting from the MSB.
+    /// 0 = MSB (bit 7), 7 = LSB (bit 0). After bit 7 the reader advances to
+    /// the next byte.
+    bit_pos: u8,
+}
+
+impl<'a> BitReader<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Self {
+            data,
+            byte_pos: 0,
+            bit_pos: 0,
+        }
+    }
+
+    /// Read `bits` bits (1–8) and return them right-aligned in a `u8`.
+    fn read_u8(&mut self, bits: u8) -> Result<u8, DecodeError> {
+        debug_assert!((1..=8).contains(&bits));
+        Ok(self.read_bits(bits)? as u8)
+    }
+
+    /// Read `bits` bits (1–16) and return them right-aligned in a `u16`.
+    fn read_u16(&mut self, bits: u8) -> Result<u16, DecodeError> {
+        debug_assert!((1..=16).contains(&bits));
+        Ok(self.read_bits(bits)? as u16)
+    }
+
+    /// Read `bits` bits (1–32) and return them right-aligned in a `u32`.
+    fn read_u32(&mut self, bits: u8) -> Result<u32, DecodeError> {
+        debug_assert!((1..=32).contains(&bits));
+        self.read_bits(bits)
+    }
+
+    /// Read a single bit as a `bool`.
+    fn read_bool(&mut self) -> Result<bool, DecodeError> {
+        Ok(self.read_bits(1)? != 0)
+    }
+
+    /// Number of bits remaining in the buffer.
+    fn remaining_bits(&self) -> usize {
+        let remaining_bytes = self.data.len().saturating_sub(self.byte_pos);
+        remaining_bytes * 8 - self.bit_pos as usize
+    }
+
+    /// Core read: consumes `n` bits MSB-first and returns them in the low bits of a `u32`.
+    fn read_bits(&mut self, mut n: u8) -> Result<u32, DecodeError> {
+        if self.remaining_bits() < n as usize {
+            return Err(DecodeError::MalformedPayload);
+        }
+        let mut result: u32 = 0;
+        while n > 0 {
+            // Bits available in the current byte.
+            let avail = 8 - self.bit_pos;
+            let take = n.min(avail);
+            // Shift the current byte so the next `take` bits are at the top,
+            // then mask them off.
+            let shift = avail - take;
+            let mask = ((1u16 << take) - 1) as u8;
+            let bits = (self.data[self.byte_pos] >> shift) & mask;
+            result = (result << take) | bits as u32;
+            self.bit_pos += take;
+            if self.bit_pos == 8 {
+                self.byte_pos += 1;
+                self.bit_pos = 0;
+            }
+            n -= take;
+        }
+        Ok(result)
+    }
+}
+
 /// A Dynamic HDR InfoFrame.
 ///
 /// Carries per-frame or per-scene dynamic tone mapping metadata for formats
@@ -330,6 +409,64 @@ mod tests {
     use super::*;
     #[cfg(any(feature = "alloc", feature = "std"))]
     use alloc::vec;
+
+    // --- BitReader tests ---
+
+    #[test]
+    fn bit_reader_single_byte_full() {
+        let mut r = BitReader::new(&[0b1010_1010]);
+        assert_eq!(r.read_u8(8).unwrap(), 0b1010_1010);
+        assert_eq!(r.remaining_bits(), 0);
+    }
+
+    #[test]
+    fn bit_reader_msb_first_ordering() {
+        // Read 4 bits then 4 bits from 0b1100_0011.
+        let mut r = BitReader::new(&[0b1100_0011]);
+        assert_eq!(r.read_u8(4).unwrap(), 0b1100);
+        assert_eq!(r.read_u8(4).unwrap(), 0b0011);
+    }
+
+    #[test]
+    fn bit_reader_spans_byte_boundary() {
+        // Read 3 bits from byte 0 and 5 bits that straddle into byte 1.
+        // data = [0b101_00000, 0b11111_000]
+        // read_u8(8) starting at bit 5 of byte 0 should give bits 5,6,7 of
+        // byte 0 and bits 0,1,2,3,4 of byte 1.
+        let mut r = BitReader::new(&[0b10100000, 0b11111000]);
+        let _ = r.read_u8(5).unwrap(); // consume first 5 bits
+        assert_eq!(r.read_u8(8).unwrap(), 0b000_11111);
+    }
+
+    #[test]
+    fn bit_reader_read_bool() {
+        let mut r = BitReader::new(&[0b1000_0000]);
+        assert!(r.read_bool().unwrap());
+        assert!(!r.read_bool().unwrap());
+    }
+
+    #[test]
+    fn bit_reader_read_u32_wide() {
+        // Pack 0xDEAD_BEEF into 4 bytes and read it back as 32 bits.
+        let data = 0xDEAD_BEEFu32.to_be_bytes();
+        let mut r = BitReader::new(&data);
+        assert_eq!(r.read_u32(32).unwrap(), 0xDEAD_BEEF);
+    }
+
+    #[test]
+    fn bit_reader_short_read_is_error() {
+        let mut r = BitReader::new(&[0xFFu8]);
+        let _ = r.read_u8(8).unwrap();
+        assert!(matches!(r.read_u8(1), Err(DecodeError::MalformedPayload)));
+    }
+
+    #[test]
+    fn bit_reader_remaining_bits() {
+        let mut r = BitReader::new(&[0xFF, 0xFF]);
+        assert_eq!(r.remaining_bits(), 16);
+        let _ = r.read_u8(3).unwrap();
+        assert_eq!(r.remaining_bits(), 13);
+    }
 
     fn make_packet(seq_num: u8, total_bytes: u16, format_id: u8, chunk: &[u8]) -> [u8; 31] {
         let chunk_len = chunk.len().min(23) as u8;

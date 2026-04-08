@@ -25,4 +25,12 @@ pub enum DecodeError {
     /// indicates a caller error: the sequence has not been fully collected yet, or
     /// no packets were received.
     EmptySequence,
+    /// The assembled metadata payload is too short to contain the fields
+    /// required by its declared format.
+    ///
+    /// Distinct from [`Truncated`](DecodeError::Truncated), which fires when an
+    /// individual packet's `length` header field is out of range. This variant
+    /// fires when all packets are individually well-formed but the concatenated
+    /// payload bytes run out before all mandatory fields have been read.
+    MalformedPayload,
 }
