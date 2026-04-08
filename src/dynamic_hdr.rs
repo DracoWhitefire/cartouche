@@ -305,6 +305,182 @@ pub struct ActualPeakLuminance {
     pub entries: [[u8; 25]; 25],
 }
 
+// ---------------------------------------------------------------------------
+// SL-HDR metadata types (ETSI TS 103 433-1 Table A.1)
+// ---------------------------------------------------------------------------
+
+/// SL-HDR dynamic metadata (ETSI TS 103 433-1 Table A.1, format identifier
+/// `0x02`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlHdrMetadata {
+    /// `itu_t_t35_country_code` (8 bits).
+    pub itu_t_t35_country_code: u8,
+    /// `terminal_provider_code` (16 bits).
+    pub terminal_provider_code: u16,
+    /// `terminal_provider_oriented_code_message_idc` (8 bits).
+    pub terminal_provider_oriented_code_message_idc: u8,
+    /// `sl_hdr_mode_value_minus1` (4 bits).
+    pub sl_hdr_mode_value_minus1: u8,
+    /// `sl_hdr_spec_major_version_idc` (4 bits).
+    pub sl_hdr_spec_major_version_idc: u8,
+    /// `sl_hdr_spec_minor_version_idc` (7 bits).
+    pub sl_hdr_spec_minor_version_idc: u8,
+    /// When `true`, all SL-HDR parameters are cancelled and `body` is `None`.
+    pub sl_hdr_cancel_flag: bool,
+    /// Present only when `sl_hdr_cancel_flag` is `false`.
+    pub body: Option<SlHdrBody>,
+}
+
+/// Main SL-HDR parameter block, present when `sl_hdr_cancel_flag` is `false`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlHdrBody {
+    /// `sl_hdr_persistence_flag`.
+    pub sl_hdr_persistence_flag: bool,
+    /// `sl_hdr_payload_mode` (3 bits): 0 = tone-mapping, 1 = luminance/colour
+    /// mapping.
+    pub sl_hdr_payload_mode: u8,
+    /// Present when `original_picture_info_present_flag` is set.
+    pub original_picture_info: Option<SlHdrPictureInfo>,
+    /// Present when `target_picture_info_present_flag` is set.
+    pub target_picture_info: Option<SlHdrPictureInfo>,
+    /// Present when `src_mdcv_info_present_flag` is set.
+    pub src_mdcv_info: Option<SlHdrMdcvInfo>,
+    /// `matrix_coefficient_value[0..4]` (4 × 16 bits).
+    pub matrix_coefficient_values: [u16; 4],
+    /// `chroma_to_luma_injection[0..2]` (2 × 16 bits).
+    pub chroma_to_luma_injection: [u16; 2],
+    /// `k_coefficient_value[0..3]` (3 × 8 bits).
+    pub k_coefficient_values: [u8; 3],
+    /// Mode-dependent payload data.
+    pub payload: SlHdrPayload,
+    /// Raw extension bytes, present when `sl_hdr_extension_present_flag` was
+    /// set. Only retained in `alloc`/`std` builds.
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    pub extension: Option<SlHdrExtension>,
+}
+
+/// Picture colour and luminance info (original or target picture).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlHdrPictureInfo {
+    /// `*_picture_primaries` (8 bits).
+    pub primaries: u8,
+    /// `*_picture_max_luminance` (16 bits).
+    pub max_luminance: u16,
+    /// `*_picture_min_luminance` (16 bits).
+    pub min_luminance: u16,
+}
+
+/// Source mastering display colour volume info.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SlHdrMdcvInfo {
+    /// Chromaticity coordinates `[component][0=x, 1=y]` for 3 primaries
+    /// (3 × 2 × 16 bits).
+    pub primaries: [[u16; 2]; 3],
+    /// `src_mdcv_ref_white_x` (16 bits).
+    pub ref_white_x: u16,
+    /// `src_mdcv_ref_white_y` (16 bits).
+    pub ref_white_y: u16,
+    /// `src_mdcv_max_mastering_luminance` (16 bits).
+    pub max_mastering_luminance: u16,
+    /// `src_mdcv_min_mastering_luminance` (16 bits).
+    pub min_mastering_luminance: u16,
+}
+
+/// Mode-dependent payload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SlHdrPayload {
+    /// `sl_hdr_payload_mode == 0`: tone-mapping tables.
+    Mode0(SlHdrMode0),
+    /// `sl_hdr_payload_mode == 1`: luminance/colour mapping tables.
+    ///
+    /// Heap-allocated to keep enum variant sizes comparable; `SlHdrMode1`
+    /// contains two 127-entry tables. Only available in `alloc`/`std` builds.
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    Mode1(alloc::boxed::Box<SlHdrMode1>),
+    /// Any other `sl_hdr_payload_mode` value; the raw mode byte is preserved.
+    Unknown(u8),
+}
+
+/// Tone-mapping payload (`sl_hdr_payload_mode == 0`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SlHdrMode0 {
+    /// `tone_mapping_input_signal_black_level_offset` (8 bits).
+    pub tone_mapping_input_signal_black_level_offset: u8,
+    /// `tone_mapping_input_signal_white_level_offset` (8 bits).
+    pub tone_mapping_input_signal_white_level_offset: u8,
+    /// `shadow_gain_control` (8 bits).
+    pub shadow_gain_control: u8,
+    /// `highlight_gain_control` (8 bits).
+    pub highlight_gain_control: u8,
+    /// `mid_tone_width_adjustment_factor` (8 bits).
+    pub mid_tone_width_adjustment_factor: u8,
+    /// `tone_mapping_output_fine_tuning` table (up to 15 entries; count is 4
+    /// bits).
+    pub tone_mapping_output_fine_tuning: SlHdrTable15,
+    /// `saturation_gain` table (up to 15 entries; count is 4 bits).
+    pub saturation_gain: SlHdrTable15,
+}
+
+/// Luminance/colour mapping payload (`sl_hdr_payload_mode == 1`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SlHdrMode1 {
+    /// `lm_uniform_sampling_flag`. When `true`, `luminance_mapping.x` is not
+    /// present in the bitstream and holds zeros.
+    pub lm_uniform_sampling_flag: bool,
+    /// Luminance mapping table (up to 127 entries; count is 7 bits).
+    pub luminance_mapping: SlHdrTable127,
+    /// `cc_uniform_sampling_flag`. When `true`, `colour_correction.x` is not
+    /// present in the bitstream and holds zeros.
+    pub cc_uniform_sampling_flag: bool,
+    /// Colour correction table (up to 127 entries; count is 7 bits).
+    pub colour_correction: SlHdrTable127,
+}
+
+/// A table of up to 15 (x, y) byte pairs.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SlHdrTable15 {
+    /// Number of valid entries (up to 15).
+    pub count: u8,
+    /// X values; only `x[..count]` is valid.
+    pub x: [u8; 15],
+    /// Y values; only `y[..count]` is valid.
+    pub y: [u8; 15],
+}
+
+/// A table of up to 127 (x, y) u16 pairs.
+///
+/// X values are absent from the bitstream (and zeroed here) when the
+/// corresponding `*_uniform_sampling_flag` is `true`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlHdrTable127 {
+    /// Number of valid entries (up to 127).
+    pub count: u8,
+    /// X values; only `x[..count]` is valid.
+    pub x: [u16; 127],
+    /// Y values; only `y[..count]` is valid.
+    pub y: [u16; 127],
+}
+
+impl Default for SlHdrTable127 {
+    fn default() -> Self {
+        Self {
+            count: 0,
+            x: [0u16; 127],
+            y: [0u16; 127],
+        }
+    }
+}
+
+/// Raw extension data from `sl_hdr_extension_*` fields.
+#[cfg(any(feature = "alloc", feature = "std"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlHdrExtension {
+    /// `sl_hdr_extension_6bits` (6 bits).
+    pub extension_6bits: u8,
+    /// Raw `sl_hdr_extension_data_byte` bytes.
+    pub data: alloc::vec::Vec<u8>,
+}
+
 /// A Dynamic HDR InfoFrame.
 ///
 /// Carries per-frame or per-scene dynamic tone mapping metadata for formats
@@ -330,6 +506,14 @@ pub enum DynamicHdrInfoFrame {
     /// builds decode format `0x04` as [`Unknown`](DynamicHdrInfoFrame::Unknown).
     #[cfg(any(feature = "alloc", feature = "std"))]
     Hdr10Plus(alloc::boxed::Box<Hdr10PlusMetadata>),
+    /// SL-HDR dynamic metadata (ETSI TS 103 433-1 Table A.1, format identifier
+    /// `0x02`).
+    ///
+    /// Heap-allocated for the same reason as `Hdr10Plus`. Only available in
+    /// `alloc`/`std` builds; bare `no_std` builds decode format `0x02` as
+    /// [`Unknown`](DynamicHdrInfoFrame::Unknown).
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    SlHdr(alloc::boxed::Box<SlHdrMetadata>),
     /// An unrecognised metadata format.
     ///
     /// Returned when the format identifier in the packet sequence is not
@@ -819,6 +1003,17 @@ impl IntoPackets for DynamicHdrInfoFrame {
                     offset: 0,
                     seq_num: 0,
                     payload,
+                })
+            }
+            #[cfg(any(feature = "alloc", feature = "std"))]
+            DynamicHdrInfoFrame::SlHdr(_) => {
+                // Encoding not yet implemented.
+                Decoded::new(DynamicHdrIter {
+                    format_id: 0x02,
+                    total_bytes: 0,
+                    offset: 0,
+                    seq_num: 0,
+                    payload: alloc::vec::Vec::new(),
                 })
             }
         }
