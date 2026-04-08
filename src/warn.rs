@@ -131,8 +131,7 @@ pub enum HdmiForumVsiWarning {
 
 /// Warnings produced while decoding a Dynamic HDR InfoFrame.
 ///
-/// See [`AviWarning`] for variant documentation — the variants are identical
-/// across all per-frame warning types.
+/// See [`AviWarning`] for variant documentation of the first three variants.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DynamicHdrWarning {
@@ -156,6 +155,39 @@ pub enum DynamicHdrWarning {
         field: &'static str,
         /// The raw byte value that was not recognised.
         raw: u8,
+    },
+    /// A packet's `seq_num` field did not equal its position in the slice.
+    ///
+    /// `index` is the packet's zero-based position in the `packets` slice passed to
+    /// [`DynamicHdrInfoFrame::decode_sequence`](crate::dynamic_hdr::DynamicHdrInfoFrame::decode_sequence);
+    /// `found` is the `seq_num` value actually present in the packet header.
+    OutOfOrderPacket {
+        /// Zero-based position of the packet in the sequence slice.
+        index: u8,
+        /// The `seq_num` value found in the packet header.
+        found: u8,
+    },
+    /// A packet's `total_bytes` field differs from the first packet's value.
+    ///
+    /// `total_bytes` must be identical across all packets in a sequence.
+    InconsistentTotalBytes {
+        /// Zero-based index of the inconsistent packet.
+        packet: u8,
+        /// The value declared in the first packet.
+        expected: u16,
+        /// The value found in this packet.
+        found: u16,
+    },
+    /// A packet's `format_id` field differs from the first packet's value.
+    ///
+    /// `format_id` must be identical across all packets in a sequence.
+    InconsistentFormatId {
+        /// Zero-based index of the inconsistent packet.
+        packet: u8,
+        /// The value declared in the first packet.
+        expected: u8,
+        /// The value found in this packet.
+        found: u8,
     },
 }
 
