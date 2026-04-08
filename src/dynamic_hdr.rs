@@ -569,6 +569,95 @@ impl Hdr10PlusMetadata {
         })
     }
 
+    /// Serialize this metadata to a byte buffer using `BitWriter`.
+    ///
+    /// Returns `(buf, len)` — the populated prefix of `buf`.
+    pub(crate) fn encode(&self) -> ([u8; MAX_DYNAMIC_HDR_PAYLOAD], usize) {
+        let mut w = BitWriter::new();
+
+        w.write_u8(self.application_identifier, 8);
+        w.write_u8(self.application_mode, 8);
+        if self.application_mode == 1 {
+            w.write_bool(self.scene_frame_switching_flag);
+        }
+        w.write_u8(0, 2); // 2 reserved bits
+
+        w.write_u32(self.targeted_system_display_maximum_luminance, 27);
+        w.write_bool(self.targeted_system_display_actual_peak_luminance_flag);
+        if let Some(ref lum) = self.targeted_system_display_actual_peak_luminance {
+            Self::encode_actual_peak_luminance(&mut w, lum);
+        }
+
+        w.write_u8(self.windows.count - 1, 2); // stored as count − 1
+        for win in self.windows.windows[..self.windows.count as usize].iter() {
+            Self::encode_window(&mut w, win);
+        }
+
+        w.write_bool(self.mastering_display_actual_peak_luminance_flag);
+        if let Some(ref lum) = self.mastering_display_actual_peak_luminance {
+            Self::encode_actual_peak_luminance(&mut w, lum);
+        }
+
+        // Tone-mapping second pass.
+        for win in self.windows.windows[..self.windows.count as usize].iter() {
+            w.write_bool(win.tone_mapping_flag);
+            if win.tone_mapping_flag {
+                if let Some(ref kp) = win.knee_point {
+                    w.write_u16(kp.x, 12);
+                    w.write_u16(kp.y, 12);
+                }
+                w.write_u8(win.bezier_curve_anchors.count, 4);
+                for &anchor in win.bezier_curve_anchors.anchors
+                    [..win.bezier_curve_anchors.count as usize]
+                    .iter()
+                {
+                    w.write_u16(anchor, 10);
+                }
+            }
+        }
+
+        w.write_bool(self.color_saturation_mapping_flag);
+        if let Some(weight) = self.color_saturation_weight {
+            w.write_u8(weight, 6);
+        }
+
+        w.finish()
+    }
+
+    fn encode_actual_peak_luminance(w: &mut BitWriter, lum: &ActualPeakLuminance) {
+        w.write_u8(lum.num_rows, 5);
+        w.write_u8(lum.num_cols, 5);
+        for row in lum.entries.iter().take(lum.num_rows as usize) {
+            for &entry in row.iter().take(lum.num_cols as usize) {
+                w.write_u8(entry, 4);
+            }
+        }
+    }
+
+    fn encode_window(w: &mut BitWriter, win: &Hdr10PlusWindow) {
+        w.write_u16(win.upper_left_corner_x, 16);
+        w.write_u16(win.upper_left_corner_y, 16);
+        w.write_u16(win.lower_right_corner_x, 16);
+        w.write_u16(win.lower_right_corner_y, 16);
+        w.write_u16(win.center_of_ellipse_x, 16);
+        w.write_u16(win.center_of_ellipse_y, 16);
+        w.write_u8(win.rotation_angle, 8);
+        w.write_u16(win.semimajor_axis_internal_ellipse, 16);
+        w.write_u16(win.semimajor_axis_external_ellipse, 16);
+        w.write_u16(win.semiminor_axis_external_ellipse, 16);
+        w.write_bool(win.overlap_process_option);
+        for &v in win.maxscl.iter() {
+            w.write_u32(v, 17);
+        }
+        w.write_u32(win.average_maxrgb, 17);
+        w.write_u8(win.distribution_maxrgb.count, 4);
+        for i in 0..win.distribution_maxrgb.count as usize {
+            w.write_u8(win.distribution_maxrgb.percentages[i], 7);
+            w.write_u32(win.distribution_maxrgb.percentiles[i], 17);
+        }
+        w.write_u16(win.fraction_bright_pixels, 10);
+    }
+
     fn decode_window(r: &mut BitReader<'_>) -> Result<Hdr10PlusWindow, DecodeError> {
         let upper_left_corner_x = r.read_u16(16)?;
         let upper_left_corner_y = r.read_u16(16)?;
@@ -714,14 +803,16 @@ impl IntoPackets for DynamicHdrInfoFrame {
                 })
             }
             #[cfg(any(feature = "alloc", feature = "std"))]
-            DynamicHdrInfoFrame::Hdr10Plus(_) => {
-                // Encoding not yet implemented (Phase 2b encode).
+            DynamicHdrInfoFrame::Hdr10Plus(meta) => {
+                let (buf, len) = meta.encode();
+                let payload = buf[..len].to_vec();
+                let total_bytes = len as u16;
                 Decoded::new(DynamicHdrIter {
                     format_id: 0x04,
-                    total_bytes: 0,
+                    total_bytes,
                     offset: 0,
                     seq_num: 0,
-                    payload: alloc::vec::Vec::new(),
+                    payload,
                 })
             }
         }
@@ -1364,6 +1455,24 @@ mod tests {
                 .iter()
                 .any(|w| matches!(w, DynamicHdrWarning::ReservedFieldNonZero { .. }))
         );
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn hdr10plus_round_trip() {
+        use crate::encode::IntoPackets;
+
+        let (_, original) = make_minimal_hdr10plus_payload();
+        let frame = DynamicHdrInfoFrame::Hdr10Plus(alloc::boxed::Box::new(original.clone()));
+
+        // Encode to packets then decode back.
+        let pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
+
+        match decoded.value {
+            DynamicHdrInfoFrame::Hdr10Plus(meta) => assert_eq!(*meta, original),
+            other => panic!("expected Hdr10Plus, got {other:?}"),
+        }
     }
 
     #[test]
