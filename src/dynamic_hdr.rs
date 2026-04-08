@@ -450,8 +450,14 @@ impl DynamicHdrInfoFrame {
 impl Hdr10PlusMetadata {
     /// Parse a HDR10+ metadata payload (ETSI TS 103 433-1 §6.1).
     ///
-    /// `push_warning` is called for each non-fatal anomaly encountered.
-    pub(crate) fn decode(
+    /// `push_warning` is called for each non-fatal anomaly encountered (reserved
+    /// bits set, unrecognised `application_mode` value).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecodeError::MalformedPayload`] if `payload` is too short to
+    /// hold the mandatory fields for the declared structure.
+    pub fn decode(
         payload: &[u8],
         push_warning: &mut impl FnMut(DynamicHdrWarning),
     ) -> Result<Self, DecodeError> {

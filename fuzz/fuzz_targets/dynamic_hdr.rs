@@ -1,13 +1,16 @@
 #![no_main]
 
-use cartouche::dynamic_hdr::DynamicHdrInfoFrame;
-use cartouche::error::DecodeError;
+use cartouche::dynamic_hdr::{DynamicHdrInfoFrame, Hdr10PlusMetadata};
+use cartouche::encode::IntoPackets;
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
     if data.is_empty() {
         return;
     }
+
+    // Exercise Hdr10PlusMetadata::decode directly on arbitrary bytes.
+    let _ = Hdr10PlusMetadata::decode(data, &mut |_| {});
 
     // Treat the fuzz input as a sequence of 31-byte packets.
     let packets: Vec<[u8; 31]> = data
@@ -19,8 +22,14 @@ fuzz_target!(|data: &[u8]| {
         })
         .collect();
 
-    match DynamicHdrInfoFrame::decode_sequence(&packets) {
-        Ok(_) => {}
-        Err(DecodeError::Truncated { .. }) | Err(_) => {}
+    // Round-trip: decode → encode → decode; both decoded values must agree.
+    if let Ok(first) = DynamicHdrInfoFrame::decode_sequence(&packets) {
+        let re_packets: Vec<[u8; 31]> =
+            first.value.clone().into_packets().value.collect();
+        if !re_packets.is_empty() {
+            if let Ok(second) = DynamicHdrInfoFrame::decode_sequence(&re_packets) {
+                assert_eq!(first.value, second.value, "round-trip mismatch");
+            }
+        }
     }
 });
