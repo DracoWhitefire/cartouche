@@ -90,6 +90,86 @@ impl<'a> BitReader<'a> {
     }
 }
 
+/// MSB-first bit-stream writer.
+///
+/// Packs fields into a fixed-size stack buffer for encoding HDR10+ and SL-HDR
+/// payloads. Panics on overflow — callers must not exceed
+/// `MAX_DYNAMIC_HDR_PAYLOAD` bytes.
+struct BitWriter {
+    buf: [u8; MAX_DYNAMIC_HDR_PAYLOAD],
+    /// Index of the byte currently being written.
+    byte_pos: usize,
+    /// Next bit to write within `buf[byte_pos]`, counting from the MSB.
+    /// 0 = MSB (bit 7), 7 = LSB (bit 0).
+    bit_pos: u8,
+}
+
+impl BitWriter {
+    fn new() -> Self {
+        Self {
+            buf: [0u8; MAX_DYNAMIC_HDR_PAYLOAD],
+            byte_pos: 0,
+            bit_pos: 0,
+        }
+    }
+
+    /// Write `bits` bits (1–8) from the low bits of `value`.
+    fn write_u8(&mut self, value: u8, bits: u8) {
+        debug_assert!((1..=8).contains(&bits));
+        self.write_bits(value as u32, bits);
+    }
+
+    /// Write `bits` bits (1–16) from the low bits of `value`.
+    fn write_u16(&mut self, value: u16, bits: u8) {
+        debug_assert!((1..=16).contains(&bits));
+        self.write_bits(value as u32, bits);
+    }
+
+    /// Write `bits` bits (1–32) from the low bits of `value`.
+    fn write_u32(&mut self, value: u32, bits: u8) {
+        debug_assert!((1..=32).contains(&bits));
+        self.write_bits(value, bits);
+    }
+
+    /// Write a single bit.
+    fn write_bool(&mut self, value: bool) {
+        self.write_bits(value as u32, 1);
+    }
+
+    /// Returns the populated slice of the buffer.
+    fn finish(self) -> ([u8; MAX_DYNAMIC_HDR_PAYLOAD], usize) {
+        let len = if self.bit_pos == 0 {
+            self.byte_pos
+        } else {
+            self.byte_pos + 1
+        };
+        (self.buf, len)
+    }
+
+    /// Core write: places the low `n` bits of `value` into the buffer MSB-first.
+    fn write_bits(&mut self, value: u32, mut n: u8) {
+        assert!(
+            self.byte_pos < MAX_DYNAMIC_HDR_PAYLOAD,
+            "BitWriter overflow"
+        );
+        while n > 0 {
+            let avail = 8 - self.bit_pos;
+            let take = n.min(avail);
+            // Extract the top `take` bits from the remaining `n` bits of value.
+            let shift = n - take;
+            let bits = ((value >> shift) as u8) & (((1u16 << take) - 1) as u8);
+            // Place them at the correct position within the current byte.
+            self.buf[self.byte_pos] |= bits << (avail - take);
+            self.bit_pos += take;
+            if self.bit_pos == 8 {
+                self.byte_pos += 1;
+                self.bit_pos = 0;
+            }
+            n -= take;
+        }
+    }
+}
+
 /// A Dynamic HDR InfoFrame.
 ///
 /// Carries per-frame or per-scene dynamic tone mapping metadata for formats
@@ -458,6 +538,77 @@ mod tests {
         let mut r = BitReader::new(&[0xFFu8]);
         let _ = r.read_u8(8).unwrap();
         assert!(matches!(r.read_u8(1), Err(DecodeError::MalformedPayload)));
+    }
+
+    // --- BitWriter tests ---
+
+    #[test]
+    fn bit_writer_single_byte_full() {
+        let mut w = BitWriter::new();
+        w.write_u8(0b1010_1010, 8);
+        let (buf, len) = w.finish();
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 0b1010_1010);
+    }
+
+    #[test]
+    fn bit_writer_msb_first_ordering() {
+        let mut w = BitWriter::new();
+        w.write_u8(0b1100, 4);
+        w.write_u8(0b0011, 4);
+        let (buf, len) = w.finish();
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 0b1100_0011);
+    }
+
+    #[test]
+    fn bit_writer_spans_byte_boundary() {
+        let mut w = BitWriter::new();
+        w.write_u8(0b10111, 5); // top 5 bits of byte 0
+        w.write_u8(0b110, 3); // remaining 3 bits of byte 0
+        w.write_u8(0b01010101, 8); // byte 1
+        let (buf, len) = w.finish();
+        assert_eq!(len, 2);
+        assert_eq!(buf[0], 0b10111_110);
+        assert_eq!(buf[1], 0b01010101);
+    }
+
+    #[test]
+    fn bit_writer_write_bool() {
+        let mut w = BitWriter::new();
+        w.write_bool(true);
+        w.write_bool(false);
+        w.write_bool(true);
+        // Remaining 5 bits are zero → byte = 0b101_00000
+        let (buf, len) = w.finish();
+        assert_eq!(len, 1);
+        assert_eq!(buf[0], 0b1010_0000);
+    }
+
+    #[test]
+    fn bit_writer_round_trip_with_reader() {
+        let mut w = BitWriter::new();
+        w.write_u32(0xDEAD_BEEF, 32);
+        w.write_u8(0b101, 3);
+        w.write_u16(0x1234, 13);
+        let (buf, len) = w.finish();
+
+        let mut r = BitReader::new(&buf[..len]);
+        assert_eq!(r.read_u32(32).unwrap(), 0xDEAD_BEEF);
+        assert_eq!(r.read_u8(3).unwrap(), 0b101);
+        assert_eq!(r.read_u16(13).unwrap(), 0x1234);
+        assert_eq!(r.remaining_bits(), 0);
+    }
+
+    #[test]
+    fn bit_writer_partial_final_byte() {
+        // Writing 9 bits should consume exactly 2 bytes (1 full + 1 partial).
+        let mut w = BitWriter::new();
+        w.write_u16(0b1_1111_1111, 9);
+        let (buf, len) = w.finish();
+        assert_eq!(len, 2);
+        assert_eq!(buf[0], 0b1111_1111);
+        assert_eq!(buf[1] >> 7, 1); // top bit of second byte
     }
 
     #[test]
