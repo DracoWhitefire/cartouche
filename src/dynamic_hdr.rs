@@ -84,53 +84,39 @@ impl DynamicHdrInfoFrame {
         let mut payload: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
 
         for (i, packet) in packets.iter().enumerate() {
-            let length = packet[2];
-            if length > 27 {
-                return Err(DecodeError::Truncated { claimed: length });
-            }
-
-            // Checksum.
-            let sum: u8 = packet.iter().fold(0u8, |acc, &b| acc.wrapping_add(b));
-            if sum != 0x00 {
-                let expected = crate::checksum::compute_checksum(packet[..30].try_into().unwrap());
-                decoded.push_warning(DynamicHdrWarning::ChecksumMismatch {
-                    expected,
-                    found: packet[3],
-                });
+            let frag = DynamicHdrFragment::decode(packet)?;
+            for w in frag.iter_warnings() {
+                decoded.push_warning(w.clone());
             }
 
             // Sequence integrity.
-            let seq_num = packet[4];
-            if seq_num != i as u8 {
+            if frag.value.seq_num != i as u8 {
                 decoded.push_warning(DynamicHdrWarning::OutOfOrderPacket {
                     index: i as u8,
-                    found: seq_num,
+                    found: frag.value.seq_num,
                 });
             }
-            let pkt_total = u16::from_le_bytes([packet[5], packet[6]]);
-            if pkt_total != total_bytes {
-                decoded.push_warning(DynamicHdrWarning::InconsistentTotalBytes {
-                    packet: i as u8,
-                    expected: total_bytes,
-                    found: pkt_total,
-                });
-            }
-            let pkt_fmt = packet[7];
-            if pkt_fmt != format_id {
-                decoded.push_warning(DynamicHdrWarning::InconsistentFormatId {
-                    packet: i as u8,
-                    expected: format_id,
-                    found: pkt_fmt,
-                });
+            // Consistency against the first packet's invariants (skip i==0: trivially equal).
+            if i > 0 {
+                if frag.value.total_bytes != total_bytes {
+                    decoded.push_warning(DynamicHdrWarning::InconsistentTotalBytes {
+                        packet: i as u8,
+                        expected: total_bytes,
+                        found: frag.value.total_bytes,
+                    });
+                }
+                if frag.value.format_id != format_id {
+                    decoded.push_warning(DynamicHdrWarning::InconsistentFormatId {
+                        packet: i as u8,
+                        expected: format_id,
+                        found: frag.value.format_id,
+                    });
+                }
             }
 
             // Chunk accumulation.
-            // chunk_len = payload bytes after the 4-byte per-packet overhead, capped at 23.
             #[cfg(any(feature = "alloc", feature = "std"))]
-            {
-                let chunk_len = length.saturating_sub(4).min(23) as usize;
-                payload.extend_from_slice(&packet[8..8 + chunk_len]);
-            }
+            payload.extend_from_slice(&frag.value.chunk[..frag.value.chunk_len as usize]);
         }
 
         #[cfg(any(feature = "alloc", feature = "std"))]
