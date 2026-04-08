@@ -1,6 +1,15 @@
 use crate::decoded::Decoded;
+use crate::encode::IntoPackets;
 use crate::error::DecodeError;
 use crate::warn::DynamicHdrWarning;
+
+/// Maximum byte length of an assembled Dynamic HDR metadata payload.
+///
+/// Sized for a worst-case HDR10+ frame (ETSI TS 103 433-1 §6.1, all optional
+/// fields populated including two 25×25 `ActualPeakLuminance` tables):
+/// approximately 580 bytes. Used as the stack-buffer size in bare `no_std`
+/// builds where heap allocation is unavailable.
+pub(crate) const MAX_DYNAMIC_HDR_PAYLOAD: usize = 600;
 
 /// A Dynamic HDR InfoFrame.
 ///
@@ -130,6 +139,103 @@ impl DynamicHdrInfoFrame {
         }
 
         Ok(decoded)
+    }
+}
+
+/// Iterator that yields 31-byte wire packets for a [`DynamicHdrInfoFrame`].
+///
+/// Produced by [`DynamicHdrInfoFrame::into_packets`]. Yields one packet per
+/// 23-byte chunk of the serialized metadata payload; the final packet carries
+/// any remaining bytes (fewer than 23).
+pub struct DynamicHdrIter {
+    format_id: u8,
+    total_bytes: u16,
+    offset: usize,
+    seq_num: u8,
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    payload: alloc::vec::Vec<u8>,
+    #[cfg(not(any(feature = "alloc", feature = "std")))]
+    payload: [u8; MAX_DYNAMIC_HDR_PAYLOAD],
+    /// Length of valid bytes in `payload` (bare `no_std` builds only).
+    #[cfg(not(any(feature = "alloc", feature = "std")))]
+    payload_len: usize,
+}
+
+impl Iterator for DynamicHdrIter {
+    type Item = [u8; 31];
+
+    fn next(&mut self) -> Option<[u8; 31]> {
+        #[cfg(any(feature = "alloc", feature = "std"))]
+        let payload_len = self.payload.len();
+        #[cfg(not(any(feature = "alloc", feature = "std")))]
+        let payload_len = self.payload_len;
+
+        if self.offset >= payload_len {
+            return None;
+        }
+
+        let chunk_len = (payload_len - self.offset).min(23);
+
+        // Build the 30 non-checksum bytes: [type, version, length, PB0..PB26].
+        // Byte layout (offsets in the final 31-byte packet):
+        //   0: type_code=0x20, 1: version=0x01, 2: length=4+chunk_len
+        //   3: checksum (filled below), 4: seq_num, 5–6: total_bytes LE,
+        //   7: format_id, 8..8+chunk_len: chunk data
+        let mut hp = [0u8; 30];
+        hp[0] = 0x20; // Dynamic HDR type code
+        hp[1] = 0x01; // version
+        hp[2] = (4 + chunk_len) as u8;
+        hp[3] = self.seq_num;
+        let tb = self.total_bytes.to_le_bytes();
+        hp[4] = tb[0];
+        hp[5] = tb[1];
+        hp[6] = self.format_id;
+        hp[7..7 + chunk_len].copy_from_slice(&self.payload[self.offset..self.offset + chunk_len]);
+
+        let checksum = crate::checksum::compute_checksum(&hp);
+
+        let mut packet = [0u8; 31];
+        packet[..3].copy_from_slice(&hp[..3]);
+        packet[3] = checksum;
+        packet[4..].copy_from_slice(&hp[3..]);
+
+        self.offset += chunk_len;
+        self.seq_num += 1;
+
+        Some(packet)
+    }
+}
+
+impl IntoPackets for DynamicHdrInfoFrame {
+    type Iter = DynamicHdrIter;
+    type Warning = DynamicHdrWarning;
+
+    fn into_packets(self) -> Decoded<DynamicHdrIter, DynamicHdrWarning> {
+        match self {
+            DynamicHdrInfoFrame::Unknown {
+                format_id,
+                #[cfg(any(feature = "alloc", feature = "std"))]
+                payload,
+            } => {
+                #[cfg(any(feature = "alloc", feature = "std"))]
+                let total_bytes = payload.len() as u16;
+                #[cfg(not(any(feature = "alloc", feature = "std")))]
+                let total_bytes: u16 = 0;
+
+                Decoded::new(DynamicHdrIter {
+                    format_id,
+                    total_bytes,
+                    offset: 0,
+                    seq_num: 0,
+                    #[cfg(any(feature = "alloc", feature = "std"))]
+                    payload,
+                    #[cfg(not(any(feature = "alloc", feature = "std")))]
+                    payload: [0u8; MAX_DYNAMIC_HDR_PAYLOAD],
+                    #[cfg(not(any(feature = "alloc", feature = "std")))]
+                    payload_len: 0,
+                })
+            }
+        }
     }
 }
 
@@ -430,5 +536,114 @@ mod tests {
                 found: 0x02,
             }
         )));
+    }
+
+    // --- IntoPackets / round-trip tests ---
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn decode_sequence_unknown_payload_roundtrip() {
+        use crate::encode::IntoPackets;
+
+        // 50-byte payload → 3 packets (23 + 23 + 4).
+        let original_payload: alloc::vec::Vec<u8> = (0u8..50).collect();
+        let frame = DynamicHdrInfoFrame::Unknown {
+            format_id: 0x07,
+            payload: original_payload.clone(),
+        };
+
+        let encoded = frame.into_packets();
+        assert!(encoded.iter_warnings().next().is_none());
+
+        let packets: alloc::vec::Vec<[u8; 31]> = encoded.value.collect();
+        assert_eq!(packets.len(), 3);
+
+        let decoded = DynamicHdrInfoFrame::decode_sequence(&packets).unwrap();
+        assert!(decoded.iter_warnings().next().is_none());
+        assert_eq!(
+            decoded.value,
+            DynamicHdrInfoFrame::Unknown {
+                format_id: 0x07,
+                payload: original_payload,
+            }
+        );
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn into_packets_seq_nums_sequential() {
+        use crate::encode::IntoPackets;
+
+        let frame = DynamicHdrInfoFrame::Unknown {
+            format_id: 0x04,
+            payload: alloc::vec![0u8; 50],
+        };
+        for (expected_seq, packet) in frame.into_packets().value.enumerate() {
+            assert_eq!(packet[4], expected_seq as u8);
+        }
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn into_packets_total_bytes_consistent() {
+        use crate::encode::IntoPackets;
+
+        let payload_len: u16 = 50;
+        let frame = DynamicHdrInfoFrame::Unknown {
+            format_id: 0x04,
+            payload: alloc::vec![0u8; payload_len as usize],
+        };
+        for packet in frame.into_packets().value {
+            let tb = u16::from_le_bytes([packet[5], packet[6]]);
+            assert_eq!(tb, payload_len);
+        }
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn into_packets_all_checksums_valid() {
+        use crate::encode::IntoPackets;
+
+        let frame = DynamicHdrInfoFrame::Unknown {
+            format_id: 0x04,
+            payload: alloc::vec![0xABu8; 50],
+        };
+        for packet in frame.into_packets().value {
+            let sum: u8 = packet.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+            assert_eq!(sum, 0, "packet checksum must make all-bytes sum equal 0");
+        }
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn into_packets_final_partial_chunk() {
+        use crate::encode::IntoPackets;
+
+        // 24 bytes → 2 packets: first full (23 bytes), second partial (1 byte).
+        let frame = DynamicHdrInfoFrame::Unknown {
+            format_id: 0x04,
+            payload: alloc::vec![0xFFu8; 24],
+        };
+        let packets: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
+        assert_eq!(packets.len(), 2);
+        // length field = 4 + chunk_len
+        assert_eq!(packets[0][2], 4 + 23);
+        assert_eq!(packets[1][2], 4 + 1);
+        // trailing bytes of the second packet must be zero-padded.
+        for &b in &packets[1][9..] {
+            assert_eq!(b, 0);
+        }
+    }
+
+    #[test]
+    fn into_packets_empty_payload_yields_no_packets() {
+        use crate::encode::IntoPackets;
+
+        let frame = DynamicHdrInfoFrame::Unknown {
+            format_id: 0x04,
+            #[cfg(any(feature = "alloc", feature = "std"))]
+            payload: alloc::vec![],
+        };
+        assert!(frame.into_packets().value.next().is_none());
     }
 }
