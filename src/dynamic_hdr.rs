@@ -170,6 +170,141 @@ impl BitWriter {
     }
 }
 
+// ---------------------------------------------------------------------------
+// HDR10+ metadata types (ETSI TS 103 433-1)
+// ---------------------------------------------------------------------------
+
+/// HDR10+ dynamic metadata (ETSI TS 103 433-1, format identifier `0x04`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hdr10PlusMetadata {
+    /// Application-specific identifier (8 bits).
+    pub application_identifier: u8,
+    /// Application mode: 0 = scene-based, 1 = frame-based (8 bits).
+    pub application_mode: u8,
+    /// Scene/frame switching flag — present only when `application_mode == 1`
+    /// (1 bit).
+    pub scene_frame_switching_flag: bool,
+    /// Maximum luminance of the targeted system display, in cd/m² (27 bits).
+    pub targeted_system_display_maximum_luminance: u32,
+    /// Whether the targeted system display actual peak luminance table is
+    /// present (1 bit).
+    pub targeted_system_display_actual_peak_luminance_flag: bool,
+    /// Targeted system display actual peak luminance table.
+    /// `None` when the flag above is `false`.
+    pub targeted_system_display_actual_peak_luminance: Option<ActualPeakLuminance>,
+    /// Tone-mapping window data (1–3 windows).
+    pub windows: Hdr10PlusWindows,
+    /// Whether the mastering display actual peak luminance table is present
+    /// (1 bit).
+    pub mastering_display_actual_peak_luminance_flag: bool,
+    /// Mastering display actual peak luminance table.
+    /// `None` when the flag above is `false`.
+    pub mastering_display_actual_peak_luminance: Option<ActualPeakLuminance>,
+    /// Whether colour saturation mapping is present (1 bit).
+    pub color_saturation_mapping_flag: bool,
+    /// Colour saturation weight (6 bits). `None` when
+    /// `color_saturation_mapping_flag` is `false`.
+    pub color_saturation_weight: Option<u8>,
+}
+
+/// Up to three tone-mapping windows.
+///
+/// Stored as a fixed array with a count rather than a `Vec` to allow `no_std`
+/// without alloc. Only `windows[..count as usize]` is valid.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Hdr10PlusWindows {
+    /// Number of valid windows (1–3).
+    pub count: u8,
+    /// Window data; only `windows[..count as usize]` is populated.
+    pub windows: [Hdr10PlusWindow; 3],
+}
+
+/// Tone-mapping parameters for one window.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Hdr10PlusWindow {
+    /// Upper-left corner X coordinate (16 bits).
+    pub upper_left_corner_x: u16,
+    /// Upper-left corner Y coordinate (16 bits).
+    pub upper_left_corner_y: u16,
+    /// Lower-right corner X coordinate (16 bits).
+    pub lower_right_corner_x: u16,
+    /// Lower-right corner Y coordinate (16 bits).
+    pub lower_right_corner_y: u16,
+    /// Centre of ellipse X coordinate (16 bits).
+    pub center_of_ellipse_x: u16,
+    /// Centre of ellipse Y coordinate (16 bits).
+    pub center_of_ellipse_y: u16,
+    /// Rotation angle of the ellipse (8 bits).
+    pub rotation_angle: u8,
+    /// Semi-major axis of the internal ellipse (16 bits).
+    pub semimajor_axis_internal_ellipse: u16,
+    /// Semi-major axis of the external ellipse (16 bits).
+    pub semimajor_axis_external_ellipse: u16,
+    /// Semi-minor axis of the external ellipse (16 bits).
+    pub semiminor_axis_external_ellipse: u16,
+    /// Overlap process option (1 bit).
+    pub overlap_process_option: bool,
+    /// Maximum Scene-referred Linear values, one per RGB component (3 × 17
+    /// bits).
+    pub maxscl: [u32; 3],
+    /// Average maximum RGB value (17 bits).
+    pub average_maxrgb: u32,
+    /// MaxRGB distribution data.
+    pub distribution_maxrgb: DistributionMaxrgb,
+    /// Fraction of bright pixels (10 bits).
+    pub fraction_bright_pixels: u16,
+    /// Whether tone-mapping parameters are present (1 bit).
+    pub tone_mapping_flag: bool,
+    /// Knee point for the tone-mapping curve.
+    /// `None` when `tone_mapping_flag` is `false`.
+    pub knee_point: Option<KneePoint>,
+    /// Bezier curve anchors for the tone-mapping curve.
+    /// Only populated when `tone_mapping_flag` is `true`.
+    pub bezier_curve_anchors: BezierAnchors,
+}
+
+/// MaxRGB distribution percentages and percentiles.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DistributionMaxrgb {
+    /// Number of valid distribution entries (up to 15).
+    pub count: u8,
+    /// Percentage values (7 bits each); only `[..count as usize]` is valid.
+    pub percentages: [u8; 15],
+    /// Percentile values (17 bits each); only `[..count as usize]` is valid.
+    pub percentiles: [u32; 15],
+}
+
+/// Knee-point coordinates for the tone-mapping curve.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KneePoint {
+    /// X coordinate (12 bits).
+    pub x: u16,
+    /// Y coordinate (12 bits).
+    pub y: u16,
+}
+
+/// Bezier curve anchors for the tone-mapping curve.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BezierAnchors {
+    /// Number of valid anchors (up to 9).
+    pub count: u8,
+    /// Anchor values (10 bits each); only `[..count as usize]` is valid.
+    pub anchors: [u16; 9],
+}
+
+/// Actual peak luminance table, used for both targeted system display and
+/// mastering display.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ActualPeakLuminance {
+    /// Number of rows (5 bits, up to 25).
+    pub num_rows: u8,
+    /// Number of columns (5 bits, up to 25).
+    pub num_cols: u8,
+    /// Row-major luminance entries (4 bits each, representing 0–1 in steps of
+    /// 1/15). Only `entries[..num_rows][..num_cols]` is valid.
+    pub entries: [[u8; 25]; 25],
+}
+
 /// A Dynamic HDR InfoFrame.
 ///
 /// Carries per-frame or per-scene dynamic tone mapping metadata for formats
@@ -182,6 +317,19 @@ impl BitWriter {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DynamicHdrInfoFrame {
+    /// An unrecognised metadata format.
+    ///
+    /// Returned when the format identifier in the packet sequence is not
+    /// recognised by this version of `cartouche`. In `alloc`/`std` builds the
+    /// raw metadata bytes are retained in `payload`, making this variant
+    /// re-encodable. In bare `no_std` builds the payload is not retained.
+    /// HDR10+ dynamic metadata (ETSI TS 103 433-1, format identifier `0x04`).
+    ///
+    /// The metadata is heap-allocated to keep the enum size comparable to
+    /// other variants. Only available in `alloc`/`std` builds; bare `no_std`
+    /// builds decode format `0x04` as [`Unknown`](DynamicHdrInfoFrame::Unknown).
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    Hdr10Plus(alloc::boxed::Box<Hdr10PlusMetadata>),
     /// An unrecognised metadata format.
     ///
     /// Returned when the format identifier in the packet sequence is not
@@ -378,6 +526,17 @@ impl IntoPackets for DynamicHdrInfoFrame {
                     payload: [0u8; MAX_DYNAMIC_HDR_PAYLOAD],
                     #[cfg(not(any(feature = "alloc", feature = "std")))]
                     payload_len: 0,
+                })
+            }
+            #[cfg(any(feature = "alloc", feature = "std"))]
+            DynamicHdrInfoFrame::Hdr10Plus(_) => {
+                // Encoding not yet implemented (Phase 2b encode).
+                Decoded::new(DynamicHdrIter {
+                    format_id: 0x04,
+                    total_bytes: 0,
+                    offset: 0,
+                    seq_num: 0,
+                    payload: alloc::vec::Vec::new(),
                 })
             }
         }
