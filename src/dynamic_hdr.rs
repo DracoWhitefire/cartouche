@@ -9,7 +9,7 @@ use crate::warn::DynamicHdrWarning;
 /// fields populated including two 25×25 `ActualPeakLuminance` tables):
 /// approximately 580 bytes. Used as the stack-buffer size in bare `no_std`
 /// builds where heap allocation is unavailable.
-pub(crate) const MAX_DYNAMIC_HDR_PAYLOAD: usize = 600;
+pub(crate) const MAX_DYNAMIC_HDR_PAYLOAD: usize = 2200;
 
 /// MSB-first bit-stream reader.
 ///

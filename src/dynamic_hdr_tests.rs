@@ -1,4 +1,3 @@
-
 use super::*;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use alloc::vec;
@@ -1409,4 +1408,128 @@ fn slhdr_mode0_round_trip() {
         DynamicHdrInfoFrame::SlHdr(meta) => assert_eq!(*meta, original),
         other => panic!("expected SlHdr, got {other:?}"),
     }
+}
+
+// --- BitWriter overflow regression tests ---
+
+/// Regression for fuzz crash: encode a maximally-populated HDR10+ frame and
+/// verify that `into_packets` does not panic (requires MAX_DYNAMIC_HDR_PAYLOAD
+/// to be at least the 903-byte worst-case encoded size).
+#[test]
+#[cfg(any(feature = "alloc", feature = "std"))]
+fn hdr10plus_max_size_encode_no_panic() {
+    use crate::encode::IntoPackets;
+
+    // Build an ActualPeakLuminance with 25×25 entries (maximum possible).
+    let make_apl = || ActualPeakLuminance {
+        num_rows: 25,
+        num_cols: 25,
+        entries: [[0x0F; 25]; 25],
+    };
+
+    // Build a window with 15 distribution_maxrgb entries and 9 bezier anchors.
+    let make_window = || Hdr10PlusWindow {
+        distribution_maxrgb: DistributionMaxrgb {
+            count: 15,
+            percentages: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+            percentiles: [0xFFFF; 15],
+        },
+        tone_mapping_flag: true,
+        knee_point: Some(KneePoint { x: 0xFFF, y: 0xFFF }),
+        bezier_curve_anchors: BezierAnchors {
+            count: 9,
+            anchors: [0x3FF; 9],
+        },
+        maxscl: [0x1FFFF; 3],
+        average_maxrgb: 0x1FFFF,
+        fraction_bright_pixels: 0x3FF,
+        ..Default::default()
+    };
+
+    let meta = Hdr10PlusMetadata {
+        application_identifier: 4,
+        application_mode: 1,
+        scene_frame_switching_flag: true,
+        targeted_system_display_maximum_luminance: 0x07FF_FFFF,
+        targeted_system_display_actual_peak_luminance_flag: true,
+        targeted_system_display_actual_peak_luminance: Some(make_apl()),
+        windows: Hdr10PlusWindows {
+            count: 3,
+            windows: [make_window(), make_window(), make_window()],
+        },
+        mastering_display_actual_peak_luminance_flag: true,
+        mastering_display_actual_peak_luminance: Some(make_apl()),
+        color_saturation_mapping_flag: true,
+        color_saturation_weight: Some(0x3F),
+    };
+
+    let frame = DynamicHdrInfoFrame::Hdr10Plus(alloc::boxed::Box::new(meta));
+    // Must not panic.
+    let _pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
+}
+
+/// Regression for fuzz crash: encode a maximally-populated SL-HDR mode-1 frame
+/// with a maximum-length extension and verify that `into_packets` does not panic
+/// (requires MAX_DYNAMIC_HDR_PAYLOAD to be at least the 2107-byte worst-case).
+#[test]
+#[cfg(any(feature = "alloc", feature = "std"))]
+fn slhdr_max_size_encode_no_panic() {
+    use crate::encode::IntoPackets;
+
+    // 127-entry mode-1 tables, both non-uniform (x + y per entry).
+    let make_table = || SlHdrTable127 {
+        count: 127,
+        x: [0xFFFF; 127],
+        y: [0xFFFF; 127],
+    };
+
+    let body = SlHdrBody {
+        sl_hdr_persistence_flag: true,
+        original_picture_info: Some(SlHdrPictureInfo {
+            primaries: 0xFF,
+            max_luminance: 0xFFFF,
+            min_luminance: 0xFFFF,
+        }),
+        target_picture_info: Some(SlHdrPictureInfo {
+            primaries: 0xFF,
+            max_luminance: 0xFFFF,
+            min_luminance: 0xFFFF,
+        }),
+        src_mdcv_info: Some(SlHdrMdcvInfo {
+            primaries: [[0xFFFF; 2]; 3],
+            ref_white_x: 0xFFFF,
+            ref_white_y: 0xFFFF,
+            max_mastering_luminance: 0xFFFF,
+            min_mastering_luminance: 0xFFFF,
+        }),
+        extension: Some(SlHdrExtension {
+            extension_6bits: 0x3F,
+            data: alloc::vec![0xAB; 1023],
+        }),
+        sl_hdr_payload_mode: 1,
+        matrix_coefficient_values: [0xFFFF; 4],
+        chroma_to_luma_injection: [0xFFFF; 2],
+        k_coefficient_values: [0xFF; 3],
+        payload: SlHdrPayload::Mode1(alloc::boxed::Box::new(SlHdrMode1 {
+            lm_uniform_sampling_flag: false,
+            luminance_mapping: make_table(),
+            cc_uniform_sampling_flag: false,
+            colour_correction: make_table(),
+        })),
+    };
+
+    let meta = SlHdrMetadata {
+        itu_t_t35_country_code: 0xB5,
+        terminal_provider_code: 0x003C,
+        terminal_provider_oriented_code_message_idc: 0x01,
+        sl_hdr_mode_value_minus1: 0,
+        sl_hdr_spec_major_version_idc: 0,
+        sl_hdr_spec_minor_version_idc: 0,
+        sl_hdr_cancel_flag: false,
+        body: Some(body),
+    };
+
+    let frame = DynamicHdrInfoFrame::SlHdr(alloc::boxed::Box::new(meta));
+    // Must not panic.
+    let _pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
 }
