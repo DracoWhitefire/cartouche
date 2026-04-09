@@ -5,10 +5,8 @@ use crate::warn::DynamicHdrWarning;
 
 /// Maximum byte length of an assembled Dynamic HDR metadata payload.
 ///
-/// Sized for a worst-case HDR10+ frame (ETSI TS 103 433-1 §6.1, all optional
-/// fields populated including two 25×25 `ActualPeakLuminance` tables):
-/// approximately 580 bytes. Used as the stack-buffer size in bare `no_std`
-/// builds where heap allocation is unavailable.
+/// Sized for a worst-case SL-HDR mode-1 + max extension fields populated: approximately 2107 bytes.
+/// Used as the stack-buffer size in bare `no_std` builds where heap allocation is unavailable.
 pub(crate) const MAX_DYNAMIC_HDR_PAYLOAD: usize = 2200;
 
 /// MSB-first bit-stream reader.
