@@ -1481,5 +1481,4 @@ impl DynamicHdrFragment {
 }
 
 #[cfg(test)]
-#[path = "dynamic_hdr_tests.rs"]
 mod tests;
