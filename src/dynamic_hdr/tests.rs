@@ -1,7 +1,14 @@
 use super::*;
+use crate::dynamic_hdr::hdr10plus::{
+    ActualPeakLuminance, BezierAnchors, DistributionMaxrgb, Hdr10PlusWindow, Hdr10PlusWindows,
+    KneePoint,
+};
+use crate::dynamic_hdr::slhdr::{
+    SlHdrBody, SlHdrExtension, SlHdrMdcvInfo, SlHdrMetadata, SlHdrMode0, SlHdrMode1, SlHdrPayload,
+    SlHdrPictureInfo, SlHdrTable15, SlHdrTable127,
+};
 #[cfg(any(feature = "alloc", feature = "std"))]
 use alloc::vec;
-
 // --- BitReader tests ---
 
 #[test]
