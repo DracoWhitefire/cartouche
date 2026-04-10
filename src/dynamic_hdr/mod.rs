@@ -387,10 +387,11 @@ impl Iterator for DynamicHdrIter {
         let chunk_len = (payload_len - self.offset).min(23);
 
         // Build the 30 non-checksum bytes: [type, version, length, PB0..PB26].
-        // Byte layout (offsets in the final 31-byte packet):
-        //   0: type_code=0x20, 1: version=0x01, 2: length=4+chunk_len
-        //   3: checksum (filled below), 4: seq_num, 5–6: total_bytes LE,
-        //   7: format_id, 8..8+chunk_len: chunk data
+        // hp indices:   0: type_code=0x20, 1: version=0x01, 2: length=4+chunk_len
+        //               3: seq_num, 4–5: total_bytes LE, 6: format_id, 7..7+chunk_len: chunk data
+        // packet indices (after checksum inserted at [3]):
+        //               3: checksum, 4: seq_num, 5–6: total_bytes LE,
+        //               7: format_id, 8..8+chunk_len: chunk data
         let mut hp = [0u8; 30];
         hp[0] = 0x20; // Dynamic HDR type code
         hp[1] = 0x01; // version
