@@ -181,10 +181,13 @@ impl BitWriter {
 ///
 /// # Stack size
 ///
-/// In bare `no_std` builds, metadata is stored inline rather than
-/// heap-allocated. `Hdr10Plus` is approximately 1,700 bytes and `SlHdr`
-/// approximately 1,100 bytes. Callers on targets with limited stack may wish
-/// to store the enum in a `static` or behind a pointer.
+/// The `Hdr10Plus` variant is approximately 1,700 bytes and `SlHdr`
+/// approximately 1,100 bytes. Boxing would require `alloc`, so the metadata
+/// is stored inline in all build configurations. Callers who need a
+/// pointer-sized handle can box the whole `DynamicHdrInfoFrame` at the call
+/// site; callers on targets with limited stack may wish to store it in a
+/// `static`.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DynamicHdrInfoFrame {

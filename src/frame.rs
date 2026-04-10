@@ -21,6 +21,14 @@ use crate::warn::Warning;
 /// The `Unknown` variant preserves every byte of the payload unmodified,
 /// allowing round-trip handling of type codes not recognised by this version
 /// of `cartouche`.
+///
+/// # Stack size
+///
+/// The `DynamicHdr` variant holds a [`DynamicHdrInfoFrame`] inline, which is
+/// approximately 1,700 bytes. Boxing would require `alloc` and would prevent
+/// use in no_std environments; callers who need a pointer-sized handle can
+/// box the whole `InfoFrame` at the call site.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InfoFrame {
@@ -94,6 +102,10 @@ pub enum InfoFramePacket {
 /// requires (one per 23-byte chunk).
 pub struct InfoFrameIter(InfoFrameIterInner);
 
+// `DynamicHdrIter` carries a [u8; MAX_DYNAMIC_HDR_PAYLOAD] buffer in bare
+// no_std builds; boxing would require alloc. The iterator is short-lived so
+// the size difference is not a concern in practice.
+#[allow(clippy::large_enum_variant)]
 enum InfoFrameIterInner {
     Single(Option<SinglePacketIter>),
     Dynamic(DynamicHdrIter),

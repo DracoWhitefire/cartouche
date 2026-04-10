@@ -83,6 +83,13 @@ pub struct SlHdrMdcvInfo {
 }
 
 /// Mode-dependent payload.
+///
+/// `Mode1` carries two 127-entry `u16` tables (approximately 1,000 bytes
+/// total). Boxing would require `alloc`, so the data is stored inline in all
+/// build configurations. Callers who decode mode-1 streams on stack-limited
+/// targets should store the enclosing [`SlHdrMetadata`] in a `static` or
+/// equivalent.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlHdrPayload {
     /// `sl_hdr_payload_mode == 0`: tone-mapping tables.
