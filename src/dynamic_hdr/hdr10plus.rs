@@ -291,6 +291,10 @@ impl Hdr10PlusMetadata {
             Self::encode_actual_peak_luminance(&mut w, lum);
         }
 
+        debug_assert!(
+            (1..=3).contains(&self.windows.count),
+            "windows.count must be 1–3"
+        );
         w.write_u8(self.windows.count - 1, 2); // stored as count − 1
         for win in self.windows.windows[..self.windows.count as usize].iter() {
             Self::encode_window(&mut w, win);
