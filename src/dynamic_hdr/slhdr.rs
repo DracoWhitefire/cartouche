@@ -51,6 +51,9 @@ pub struct SlHdrBody {
     pub payload: SlHdrPayload,
     /// Raw extension bytes, present when `sl_hdr_extension_present_flag` was
     /// set. Only retained in `alloc`/`std` builds.
+    ///
+    /// In bare `no_std` builds this field is absent and the extension is not
+    /// retained — encoding a decoded extension-carrying stream is lossy.
     #[cfg(any(feature = "alloc", feature = "std"))]
     pub extension: Option<SlHdrExtension>,
 }
@@ -97,6 +100,9 @@ pub enum SlHdrPayload {
     /// `sl_hdr_payload_mode == 1`: luminance/colour mapping tables.
     Mode1(SlHdrMode1),
     /// Any other `sl_hdr_payload_mode` value; the raw mode byte is preserved.
+    ///
+    /// Encoding this variant is lossy: only the `sl_hdr_payload_mode` field is
+    /// written; the payload body bytes are not retained and cannot be re-emitted.
     Unknown(u8),
 }
 
@@ -484,7 +490,7 @@ impl SlHdrMetadata {
         match &body.payload {
             SlHdrPayload::Mode0(m) => Self::encode_mode0(w, m),
             SlHdrPayload::Mode1(m) => Self::encode_mode1(w, m),
-            SlHdrPayload::Unknown(_) => {} // no bits to write for unknown mode
+            SlHdrPayload::Unknown(_) => {} // no bits to write for unknown mode — encode is lossy
         }
 
         // GamutMappingEnabledFlag is always treated as false; no gamut block written.
