@@ -1,6 +1,6 @@
 use crate::decoded::Decoded;
-use crate::dynamic_hdr::hdr10plus::Hdr10PlusMetadata;
-use crate::dynamic_hdr::slhdr::SlHdrMetadata;
+pub use crate::dynamic_hdr::hdr10plus::Hdr10PlusMetadata;
+pub use crate::dynamic_hdr::slhdr::SlHdrMetadata;
 use crate::encode::IntoPackets;
 use crate::error::DecodeError;
 use crate::warn::DynamicHdrWarning;
