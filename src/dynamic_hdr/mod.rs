@@ -1,5 +1,7 @@
 use crate::decoded::Decoded;
+#[cfg(any(feature = "alloc", feature = "std"))]
 use crate::dynamic_hdr::hdr10plus::Hdr10PlusMetadata;
+#[cfg(any(feature = "alloc", feature = "std"))]
 use crate::dynamic_hdr::slhdr::SlHdrMetadata;
 use crate::encode::IntoPackets;
 use crate::error::DecodeError;
@@ -15,6 +17,7 @@ pub(crate) const MAX_DYNAMIC_HDR_PAYLOAD: usize = 2200;
 ///
 /// Used to parse HDR10+ and SL-HDR payloads, whose fields are bit-packed
 /// with no byte alignment (ETSI TS 103 433-1 §6.1).
+#[cfg(any(feature = "alloc", feature = "std"))]
 struct BitReader<'a> {
     data: &'a [u8],
     /// Index of the byte currently being read.
@@ -24,7 +27,7 @@ struct BitReader<'a> {
     /// the next byte.
     bit_pos: u8,
 }
-
+#[cfg(any(feature = "alloc", feature = "std"))]
 impl<'a> BitReader<'a> {
     fn new(data: &'a [u8]) -> Self {
         Self {
@@ -95,6 +98,7 @@ impl<'a> BitReader<'a> {
 /// Packs fields into a fixed-size stack buffer for encoding HDR10+ and SL-HDR
 /// payloads. Panics on overflow — callers must not exceed
 /// `MAX_DYNAMIC_HDR_PAYLOAD` bytes.
+#[cfg(any(feature = "alloc", feature = "std"))]
 struct BitWriter {
     buf: [u8; MAX_DYNAMIC_HDR_PAYLOAD],
     /// Index of the byte currently being written.
@@ -104,6 +108,7 @@ struct BitWriter {
     bit_pos: u8,
 }
 
+#[cfg(any(feature = "alloc", feature = "std"))]
 impl BitWriter {
     fn new() -> Self {
         Self {
