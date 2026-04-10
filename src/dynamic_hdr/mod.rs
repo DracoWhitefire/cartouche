@@ -147,11 +147,11 @@ impl BitWriter {
 
     /// Core write: places the low `n` bits of `value` into the buffer MSB-first.
     fn write_bits(&mut self, value: u32, mut n: u8) {
-        assert!(
-            self.byte_pos < MAX_DYNAMIC_HDR_PAYLOAD,
-            "BitWriter overflow"
-        );
         while n > 0 {
+            assert!(
+                self.byte_pos < MAX_DYNAMIC_HDR_PAYLOAD,
+                "BitWriter overflow"
+            );
             let avail = 8 - self.bit_pos;
             let take = n.min(avail);
             // Extract the top `take` bits from the remaining `n` bits of value.
