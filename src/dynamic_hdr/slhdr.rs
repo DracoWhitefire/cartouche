@@ -88,11 +88,7 @@ pub enum SlHdrPayload {
     /// `sl_hdr_payload_mode == 0`: tone-mapping tables.
     Mode0(SlHdrMode0),
     /// `sl_hdr_payload_mode == 1`: luminance/colour mapping tables.
-    ///
-    /// Heap-allocated to keep enum variant sizes comparable; `SlHdrMode1`
-    /// contains two 127-entry tables. Only available in `alloc`/`std` builds.
-    #[cfg(any(feature = "alloc", feature = "std"))]
-    Mode1(alloc::boxed::Box<SlHdrMode1>),
+    Mode1(SlHdrMode1),
     /// Any other `sl_hdr_payload_mode` value; the raw mode byte is preserved.
     Unknown(u8),
 }
@@ -289,7 +285,7 @@ impl SlHdrMetadata {
 
         let payload = match sl_hdr_payload_mode {
             0 => SlHdrPayload::Mode0(Self::decode_mode0(r)?),
-            1 => SlHdrPayload::Mode1(alloc::boxed::Box::new(Self::decode_mode1(r)?)),
+            1 => SlHdrPayload::Mode1(Self::decode_mode1(r)?),
             other => {
                 push_warning(DynamicHdrWarning::UnknownEnumValue {
                     field: "sl_hdr_payload_mode",
@@ -302,6 +298,7 @@ impl SlHdrMetadata {
         // GamutMappingEnabledFlag is not present in a standalone HDMI payload;
         // skip the gamut-mapping block entirely.
 
+        #[cfg(any(feature = "alloc", feature = "std"))]
         let extension = if sl_hdr_extension_present_flag {
             let extension_6bits = r.read_u8(6)?;
             let length = r.read_u16(10)? as usize;
@@ -316,6 +313,16 @@ impl SlHdrMetadata {
         } else {
             None
         };
+        // In bare no_std builds extension data is consumed and discarded; it is
+        // optional and cannot be retained without heap allocation.
+        #[cfg(not(any(feature = "alloc", feature = "std")))]
+        if sl_hdr_extension_present_flag {
+            let _ext_6bits = r.read_u8(6)?;
+            let length = r.read_u16(10)? as usize;
+            for _ in 0..length {
+                r.read_u8(8)?;
+            }
+        }
 
         Ok(SlHdrBody {
             sl_hdr_persistence_flag,
@@ -327,6 +334,7 @@ impl SlHdrMetadata {
             chroma_to_luma_injection,
             k_coefficient_values,
             payload,
+            #[cfg(any(feature = "alloc", feature = "std"))]
             extension,
         })
     }
@@ -468,7 +476,6 @@ impl SlHdrMetadata {
 
         match &body.payload {
             SlHdrPayload::Mode0(m) => Self::encode_mode0(w, m),
-            #[cfg(any(feature = "alloc", feature = "std"))]
             SlHdrPayload::Mode1(m) => Self::encode_mode1(w, m),
             SlHdrPayload::Unknown(_) => {} // no bits to write for unknown mode
         }

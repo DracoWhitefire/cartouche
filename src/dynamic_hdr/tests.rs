@@ -3,8 +3,10 @@ use crate::dynamic_hdr::hdr10plus::{
     ActualPeakLuminance, BezierAnchors, DistributionMaxrgb, Hdr10PlusWindow, Hdr10PlusWindows,
     KneePoint,
 };
+#[cfg(any(feature = "alloc", feature = "std"))]
+use crate::dynamic_hdr::slhdr::SlHdrExtension;
 use crate::dynamic_hdr::slhdr::{
-    SlHdrBody, SlHdrExtension, SlHdrMdcvInfo, SlHdrMetadata, SlHdrMode0, SlHdrMode1, SlHdrPayload,
+    SlHdrBody, SlHdrMdcvInfo, SlHdrMetadata, SlHdrMode0, SlHdrMode1, SlHdrPayload,
     SlHdrPictureInfo, SlHdrTable15, SlHdrTable127,
 };
 #[cfg(any(feature = "alloc", feature = "std"))]
@@ -641,11 +643,11 @@ fn hdr10plus_full_fields_decode() {
 fn hdr10plus_full_fields_round_trip() {
     use crate::encode::IntoPackets;
     let (_, original) = make_full_hdr10plus_payload();
-    let frame = DynamicHdrInfoFrame::Hdr10Plus(alloc::boxed::Box::new(original.clone()));
+    let frame = DynamicHdrInfoFrame::Hdr10Plus(original.clone());
     let pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
     let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
     match decoded.value {
-        DynamicHdrInfoFrame::Hdr10Plus(meta) => assert_eq!(*meta, original),
+        DynamicHdrInfoFrame::Hdr10Plus(meta) => assert_eq!(meta, original),
         other => panic!("expected Hdr10Plus, got {other:?}"),
     }
 }
@@ -835,14 +837,14 @@ fn hdr10plus_round_trip() {
     use crate::encode::IntoPackets;
 
     let (_, original) = make_minimal_hdr10plus_payload();
-    let frame = DynamicHdrInfoFrame::Hdr10Plus(alloc::boxed::Box::new(original.clone()));
+    let frame = DynamicHdrInfoFrame::Hdr10Plus(original.clone());
 
     // Encode to packets then decode back.
     let pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
     let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
 
     match decoded.value {
-        DynamicHdrInfoFrame::Hdr10Plus(meta) => assert_eq!(*meta, original),
+        DynamicHdrInfoFrame::Hdr10Plus(meta) => assert_eq!(meta, original),
         other => panic!("expected Hdr10Plus, got {other:?}"),
     }
 }
@@ -1007,11 +1009,11 @@ fn slhdr_full_body_decode() {
 fn slhdr_full_body_round_trip() {
     use crate::encode::IntoPackets;
     let (_, original) = make_slhdr_full_body_payload();
-    let frame = DynamicHdrInfoFrame::SlHdr(alloc::boxed::Box::new(original.clone()));
+    let frame = DynamicHdrInfoFrame::SlHdr(original.clone());
     let pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
     let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
     match decoded.value {
-        DynamicHdrInfoFrame::SlHdr(meta) => assert_eq!(*meta, original),
+        DynamicHdrInfoFrame::SlHdr(meta) => assert_eq!(meta, original),
         other => panic!("expected SlHdr, got {other:?}"),
     }
 }
@@ -1091,11 +1093,11 @@ fn slhdr_cancelled_round_trip() {
 
     let payload = make_slhdr_cancelled_payload();
     let original = SlHdrMetadata::decode(&payload, &mut |_| {}).unwrap();
-    let frame = DynamicHdrInfoFrame::SlHdr(alloc::boxed::Box::new(original.clone()));
+    let frame = DynamicHdrInfoFrame::SlHdr(original.clone());
     let pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
     let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
     match decoded.value {
-        DynamicHdrInfoFrame::SlHdr(meta) => assert_eq!(*meta, original),
+        DynamicHdrInfoFrame::SlHdr(meta) => assert_eq!(meta, original),
         other => panic!("expected SlHdr, got {other:?}"),
     }
 }
@@ -1146,7 +1148,7 @@ fn slhdr_unknown_payload_mode_warning() {
 
     // Encoding must not panic and must round-trip the struct.
     use crate::encode::IntoPackets;
-    let frame = DynamicHdrInfoFrame::SlHdr(alloc::boxed::Box::new(meta.clone()));
+    let frame = DynamicHdrInfoFrame::SlHdr(meta.clone());
     let pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
     let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
     match decoded.value {
@@ -1205,11 +1207,11 @@ fn slhdr_extension_round_trip() {
     assert_eq!(ext.extension_6bits, 0x3F);
     assert_eq!(ext.data, alloc::vec![0xAB, 0xCD]);
 
-    let frame = DynamicHdrInfoFrame::SlHdr(alloc::boxed::Box::new(original.clone()));
+    let frame = DynamicHdrInfoFrame::SlHdr(original.clone());
     let pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
     let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
     match decoded.value {
-        DynamicHdrInfoFrame::SlHdr(meta) => assert_eq!(*meta, original),
+        DynamicHdrInfoFrame::SlHdr(meta) => assert_eq!(meta, original),
         other => panic!("expected SlHdr, got {other:?}"),
     }
 }
@@ -1325,11 +1327,11 @@ fn slhdr_mode1_alt_sampling_round_trip() {
         other => panic!("expected Mode1, got {other:?}"),
     }
 
-    let frame = DynamicHdrInfoFrame::SlHdr(alloc::boxed::Box::new(original.clone()));
+    let frame = DynamicHdrInfoFrame::SlHdr(original.clone());
     let pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
     let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
     match decoded.value {
-        DynamicHdrInfoFrame::SlHdr(meta) => assert_eq!(*meta, original),
+        DynamicHdrInfoFrame::SlHdr(meta) => assert_eq!(meta, original),
         other => panic!("expected SlHdr, got {other:?}"),
     }
 }
@@ -1388,13 +1390,13 @@ fn slhdr_mode1_round_trip() {
 
     let payload = make_slhdr_mode1_payload();
     let original = SlHdrMetadata::decode(&payload, &mut |_| {}).unwrap();
-    let frame = DynamicHdrInfoFrame::SlHdr(alloc::boxed::Box::new(original.clone()));
+    let frame = DynamicHdrInfoFrame::SlHdr(original.clone());
 
     let pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
     let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
 
     match decoded.value {
-        DynamicHdrInfoFrame::SlHdr(meta) => assert_eq!(*meta, original),
+        DynamicHdrInfoFrame::SlHdr(meta) => assert_eq!(meta, original),
         other => panic!("expected SlHdr, got {other:?}"),
     }
 }
@@ -1406,13 +1408,13 @@ fn slhdr_mode0_round_trip() {
 
     let payload = make_slhdr_mode0_payload();
     let original = SlHdrMetadata::decode(&payload, &mut |_| {}).unwrap();
-    let frame = DynamicHdrInfoFrame::SlHdr(alloc::boxed::Box::new(original.clone()));
+    let frame = DynamicHdrInfoFrame::SlHdr(original.clone());
 
     let pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
     let decoded = DynamicHdrInfoFrame::decode_sequence(&pkts).unwrap();
 
     match decoded.value {
-        DynamicHdrInfoFrame::SlHdr(meta) => assert_eq!(*meta, original),
+        DynamicHdrInfoFrame::SlHdr(meta) => assert_eq!(meta, original),
         other => panic!("expected SlHdr, got {other:?}"),
     }
 }
@@ -1470,7 +1472,7 @@ fn hdr10plus_max_size_encode_no_panic() {
         color_saturation_weight: Some(0x3F),
     };
 
-    let frame = DynamicHdrInfoFrame::Hdr10Plus(alloc::boxed::Box::new(meta));
+    let frame = DynamicHdrInfoFrame::Hdr10Plus(meta);
     // Must not panic.
     let _pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
 }
@@ -1517,12 +1519,12 @@ fn slhdr_max_size_encode_no_panic() {
         matrix_coefficient_values: [0xFFFF; 4],
         chroma_to_luma_injection: [0xFFFF; 2],
         k_coefficient_values: [0xFF; 3],
-        payload: SlHdrPayload::Mode1(alloc::boxed::Box::new(SlHdrMode1 {
+        payload: SlHdrPayload::Mode1(SlHdrMode1 {
             lm_uniform_sampling_flag: false,
             luminance_mapping: make_table(),
             cc_uniform_sampling_flag: false,
             colour_correction: make_table(),
-        })),
+        }),
     };
 
     let meta = SlHdrMetadata {
@@ -1536,7 +1538,7 @@ fn slhdr_max_size_encode_no_panic() {
         body: Some(body),
     };
 
-    let frame = DynamicHdrInfoFrame::SlHdr(alloc::boxed::Box::new(meta));
+    let frame = DynamicHdrInfoFrame::SlHdr(meta);
     // Must not panic.
     let _pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
 }

@@ -1,7 +1,5 @@
 use crate::decoded::Decoded;
-#[cfg(any(feature = "alloc", feature = "std"))]
 use crate::dynamic_hdr::hdr10plus::Hdr10PlusMetadata;
-#[cfg(any(feature = "alloc", feature = "std"))]
 use crate::dynamic_hdr::slhdr::SlHdrMetadata;
 use crate::encode::IntoPackets;
 use crate::error::DecodeError;
@@ -17,7 +15,6 @@ pub(crate) const MAX_DYNAMIC_HDR_PAYLOAD: usize = 2200;
 ///
 /// Used to parse HDR10+ and SL-HDR payloads, whose fields are bit-packed
 /// with no byte alignment (ETSI TS 103 433-1 §6.1).
-#[cfg(any(feature = "alloc", feature = "std"))]
 struct BitReader<'a> {
     data: &'a [u8],
     /// Index of the byte currently being read.
@@ -27,7 +24,6 @@ struct BitReader<'a> {
     /// the next byte.
     bit_pos: u8,
 }
-#[cfg(any(feature = "alloc", feature = "std"))]
 impl<'a> BitReader<'a> {
     fn new(data: &'a [u8]) -> Self {
         Self {
@@ -98,7 +94,6 @@ impl<'a> BitReader<'a> {
 /// Packs fields into a fixed-size stack buffer for encoding HDR10+ and SL-HDR
 /// payloads. Panics on overflow — callers must not exceed
 /// `MAX_DYNAMIC_HDR_PAYLOAD` bytes.
-#[cfg(any(feature = "alloc", feature = "std"))]
 struct BitWriter {
     buf: [u8; MAX_DYNAMIC_HDR_PAYLOAD],
     /// Index of the byte currently being written.
@@ -108,7 +103,6 @@ struct BitWriter {
     bit_pos: u8,
 }
 
-#[cfg(any(feature = "alloc", feature = "std"))]
 impl BitWriter {
     fn new() -> Self {
         Self {
@@ -184,30 +178,21 @@ impl BitWriter {
 /// Use [`DynamicHdrFragment::decode`] to decode individual packets as they
 /// arrive. Once the full sequence is assembled, pass the raw packets to
 /// [`DynamicHdrInfoFrame::decode_sequence`] to obtain this type.
+///
+/// # Stack size
+///
+/// In bare `no_std` builds, metadata is stored inline rather than
+/// heap-allocated. `Hdr10Plus` is approximately 1,700 bytes and `SlHdr`
+/// approximately 1,100 bytes. Callers on targets with limited stack may wish
+/// to store the enum in a `static` or behind a pointer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DynamicHdrInfoFrame {
-    /// An unrecognised metadata format.
-    ///
-    /// Returned when the format identifier in the packet sequence is not
-    /// recognised by this version of `cartouche`. In `alloc`/`std` builds the
-    /// raw metadata bytes are retained in `payload`, making this variant
-    /// re-encodable. In bare `no_std` builds the payload is not retained.
     /// HDR10+ dynamic metadata (ETSI TS 103 433-1, format identifier `0x04`).
-    ///
-    /// The metadata is heap-allocated to keep the enum size comparable to
-    /// other variants. Only available in `alloc`/`std` builds; bare `no_std`
-    /// builds decode format `0x04` as [`Unknown`](DynamicHdrInfoFrame::Unknown).
-    #[cfg(any(feature = "alloc", feature = "std"))]
-    Hdr10Plus(alloc::boxed::Box<Hdr10PlusMetadata>),
+    Hdr10Plus(Hdr10PlusMetadata),
     /// SL-HDR dynamic metadata (ETSI TS 103 433-1 Table A.1, format identifier
     /// `0x02`).
-    ///
-    /// Heap-allocated for the same reason as `Hdr10Plus`. Only available in
-    /// `alloc`/`std` builds; bare `no_std` builds decode format `0x02` as
-    /// [`Unknown`](DynamicHdrInfoFrame::Unknown).
-    #[cfg(any(feature = "alloc", feature = "std"))]
-    SlHdr(alloc::boxed::Box<SlHdrMetadata>),
+    SlHdr(SlHdrMetadata),
     /// An unrecognised metadata format.
     ///
     /// Returned when the format identifier in the packet sequence is not
@@ -236,7 +221,8 @@ impl DynamicHdrInfoFrame {
     ///
     /// The format identifier is read from the first packet in the sequence
     /// (byte 7, PB3). Unknown format identifiers produce
-    /// [`DynamicHdrInfoFrame::Unknown`]; the raw payload bytes are not retained.
+    /// [`DynamicHdrInfoFrame::Unknown`]; in bare `no_std` builds the raw
+    /// payload bytes are not retained.
     ///
     /// # Errors
     ///
@@ -265,8 +251,10 @@ impl DynamicHdrInfoFrame {
             payload: alloc::vec::Vec::new(),
         });
 
-        #[cfg(any(feature = "alloc", feature = "std"))]
-        let mut payload: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+        // Accumulate metadata bytes from all packets into a fixed-size stack
+        // buffer. MAX_DYNAMIC_HDR_PAYLOAD is sized for the worst-case payload.
+        let mut payload_buf = [0u8; MAX_DYNAMIC_HDR_PAYLOAD];
+        let mut payload_len = 0usize;
 
         for (i, packet) in packets.iter().enumerate() {
             let frag = DynamicHdrFragment::decode(packet)?;
@@ -300,28 +288,60 @@ impl DynamicHdrInfoFrame {
             }
 
             // Chunk accumulation.
-            #[cfg(any(feature = "alloc", feature = "std"))]
-            payload.extend_from_slice(&frag.value.chunk[..frag.value.chunk_len as usize]);
+            let chunk = &frag.value.chunk[..frag.value.chunk_len as usize];
+            let new_len = payload_len.saturating_add(chunk.len());
+            if new_len <= MAX_DYNAMIC_HDR_PAYLOAD {
+                payload_buf[payload_len..new_len].copy_from_slice(chunk);
+                payload_len = new_len;
+            }
+            // If the payload overflows MAX_DYNAMIC_HDR_PAYLOAD the buffer is
+            // silently capped; a MalformedPayload error from the format parser
+            // will surface the truncation.
         }
 
-        #[cfg(any(feature = "alloc", feature = "std"))]
-        {
-            let mut format_warnings: alloc::vec::Vec<DynamicHdrWarning> = alloc::vec::Vec::new();
-            decoded.value = match format_id {
-                0x02 => match SlHdrMetadata::decode(&payload, &mut |w| format_warnings.push(w)) {
-                    Ok(meta) => DynamicHdrInfoFrame::SlHdr(alloc::boxed::Box::new(meta)),
-                    Err(e) => return Err(e),
-                },
-                0x04 => match Hdr10PlusMetadata::decode(&payload, &mut |w| format_warnings.push(w))
-                {
-                    Ok(meta) => DynamicHdrInfoFrame::Hdr10Plus(alloc::boxed::Box::new(meta)),
-                    Err(e) => return Err(e),
-                },
-                _ => DynamicHdrInfoFrame::Unknown { format_id, payload },
+        let payload = &payload_buf[..payload_len];
+
+        // Collect format-level warnings into a small fixed buffer so the
+        // closure does not need to borrow `decoded` during dispatch.
+        let mut fmt_warn_count = 0usize;
+        let mut fmt_warns: [Option<DynamicHdrWarning>; 4] = [const { None }; 4];
+        let decoded_value = {
+            let mut push_fmt_warn = |w: DynamicHdrWarning| {
+                if fmt_warn_count < 4 {
+                    fmt_warns[fmt_warn_count] = Some(w);
+                    fmt_warn_count += 1;
+                }
             };
-            for w in format_warnings {
-                decoded.push_warning(w);
+            match format_id {
+                0x02 => match SlHdrMetadata::decode(payload, &mut push_fmt_warn) {
+                    Ok(meta) => DynamicHdrInfoFrame::SlHdr(meta),
+                    Err(e) => return Err(e),
+                },
+                0x04 => match Hdr10PlusMetadata::decode(payload, &mut push_fmt_warn) {
+                    Ok(meta) => DynamicHdrInfoFrame::Hdr10Plus(meta),
+                    Err(e) => return Err(e),
+                },
+                _ => {
+                    #[cfg(any(feature = "alloc", feature = "std"))]
+                    {
+                        DynamicHdrInfoFrame::Unknown {
+                            format_id,
+                            payload: payload.to_vec(),
+                        }
+                    }
+                    #[cfg(not(any(feature = "alloc", feature = "std")))]
+                    {
+                        DynamicHdrInfoFrame::Unknown { format_id }
+                    }
+                }
             }
+        };
+        decoded.value = decoded_value;
+        for w in fmt_warns[..fmt_warn_count]
+            .iter_mut()
+            .filter_map(|opt| opt.take())
+        {
+            decoded.push_warning(w);
         }
 
         Ok(decoded)
@@ -421,30 +441,34 @@ impl IntoPackets for DynamicHdrInfoFrame {
                     payload_len: 0,
                 })
             }
-            #[cfg(any(feature = "alloc", feature = "std"))]
             DynamicHdrInfoFrame::Hdr10Plus(meta) => {
                 let (buf, len) = meta.encode();
-                let payload = buf[..len].to_vec();
-                let total_bytes = len as u16;
                 Decoded::new(DynamicHdrIter {
                     format_id: 0x04,
-                    total_bytes,
+                    total_bytes: len as u16,
                     offset: 0,
                     seq_num: 0,
-                    payload,
+                    #[cfg(any(feature = "alloc", feature = "std"))]
+                    payload: buf[..len].to_vec(),
+                    #[cfg(not(any(feature = "alloc", feature = "std")))]
+                    payload: buf,
+                    #[cfg(not(any(feature = "alloc", feature = "std")))]
+                    payload_len: len,
                 })
             }
-            #[cfg(any(feature = "alloc", feature = "std"))]
             DynamicHdrInfoFrame::SlHdr(meta) => {
                 let (buf, len) = meta.encode();
-                let payload = buf[..len].to_vec();
-                let total_bytes = len as u16;
                 Decoded::new(DynamicHdrIter {
                     format_id: 0x02,
-                    total_bytes,
+                    total_bytes: len as u16,
                     offset: 0,
                     seq_num: 0,
-                    payload,
+                    #[cfg(any(feature = "alloc", feature = "std"))]
+                    payload: buf[..len].to_vec(),
+                    #[cfg(not(any(feature = "alloc", feature = "std")))]
+                    payload: buf,
+                    #[cfg(not(any(feature = "alloc", feature = "std")))]
+                    payload_len: len,
                 })
             }
         }
@@ -551,9 +575,7 @@ impl DynamicHdrFragment {
     }
 }
 
-#[cfg(any(feature = "alloc", feature = "std"))]
 mod hdr10plus;
-#[cfg(any(feature = "alloc", feature = "std"))]
 mod slhdr;
 #[cfg(test)]
 mod tests;
