@@ -15,9 +15,9 @@ Dynamic HDR support.
 - `HdmiForumVsi` — full encode and decode: ALLM, VRR, DSC, QMS, FRL rate
 - `DynamicHdrFragment` — decode of individual Dynamic HDR packets, including
   `seq_num`, `total_bytes`, `format_id`, and `chunk` fields
-- `DynamicHdrInfoFrame::decode_sequence` — assembles a packet sequence and returns
-  `DynamicHdrInfoFrame::Unknown { format_id }` for all format identifiers; per-format
-  parsing is planned (see below)
+- `DynamicHdrInfoFrame::decode_sequence` — assembles a packet sequence and dispatches on
+  `format_id`; parses HDR10+ (format `0x04`) and SL-HDR (format `0x02`) into typed structs
+  in all build configurations; unrecognised identifiers produce `Unknown`
 - `DynamicHdrFragment` decode via the top-level `cartouche::decode` dispatch
 - `InfoFrame` enum — encode-path top-level type; implements `IntoPackets`
 - `InfoFramePacket` enum — decode-path top-level type returned by `cartouche::decode`
@@ -31,17 +31,6 @@ Dynamic HDR support.
 - Round-trip example (`examples/roundtrip`)
 
 ## Planned
-
-### Dynamic HDR InfoFrame — full support
-
-Complete encode and decode for the variable-length Dynamic HDR InfoFrame (HDMI 2.1 §10.2.8):
-
-- HDR10+ (ETSI TS 103 433) format: full metadata struct
-- SL-HDR format: full metadata struct
-- `Unknown { format_id, payload }` catch-all preserving raw payload bytes for
-  unrecognised format identifiers
-- `IntoPackets` impl for `DynamicHdrInfoFrame`: packet boundary alignment, sequence
-  numbering, final partial-chunk handling
 
 ### Broader test corpus
 
