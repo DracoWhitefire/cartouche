@@ -306,6 +306,7 @@ impl DynamicHdrInfoFrame {
 
         // Collect format-level warnings into a small fixed buffer so the
         // closure does not need to borrow `decoded` during dispatch.
+        // Warnings beyond the 4-slot cap are silently dropped.
         let mut fmt_warn_count = 0usize;
         let mut fmt_warns: [Option<DynamicHdrWarning>; 4] = [const { None }; 4];
         let decoded_value = {
