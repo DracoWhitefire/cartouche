@@ -8,10 +8,10 @@
 
 Encoding and decoding for HDMI InfoFrames.
 
-cartouche encodes and decodes HDMI 2.1 InfoFrames: AVI, Audio, HDR Static Metadata, and
-HDMI Forum Vendor-Specific frames are fully supported; Dynamic HDR fragment decoding and
-sequence assembly are implemented, with per-format metadata structs planned. It is a pure
-encoding/decoding library with no I/O and no allocation requirement.
+cartouche encodes and decodes HDMI 2.1 InfoFrames. All five HDMI 2.1 InfoFrame types are
+fully supported: AVI, Audio, HDR Static Metadata, HDMI Forum Vendor-Specific, and Dynamic
+HDR (HDR10+ and SL-HDR). It is a pure encoding/decoding library with no I/O and no
+allocation requirement.
 
 InfoFrames are the auxiliary metadata packets transmitted in the data island periods of an
 HDMI signal. The AVI InfoFrame signals color space and colorimetry; the HDR InfoFrames
@@ -92,10 +92,9 @@ flowchart LR
 
 ## Why cartouche
 
-**Complete coverage.** All five HDMI 2.1 InfoFrame type codes are handled. The four
-traditional types (AVI, Audio, HDR Static, HDMI Forum VSI) are fully encoded and decoded;
-Dynamic HDR fragment decode and sequence assembly are implemented, with per-format metadata
-structs (HDR10+, SL-HDR) planned.
+**Complete coverage.** All five HDMI 2.1 InfoFrame type codes are fully encoded and
+decoded: AVI, Audio, HDR Static, HDMI Forum VSI, and Dynamic HDR (HDR10+ and SL-HDR
+metadata structs included).
 
 **Typed fields, not raw bytes.** Color spaces are enums, not integers. VICs are 7-bit
 wire values; out-of-range values produce an encode warning rather than being silently
@@ -120,9 +119,9 @@ for packet in encoded.value {
 }
 ```
 
-`DynamicHdrInfoFrame::IntoPackets` is planned for the next release alongside
-per-format metadata structs (HDR10+, SL-HDR). Fragment decode and sequence assembly
-are available today.
+Dynamic HDR is fully supported: fragment decode, sequence assembly into typed
+`Hdr10PlusMetadata` or `SlHdrMetadata` structs, and `IntoPackets` encoding are all
+available and work without allocation.
 
 **No allocation.** All encoding and decoding is done without a heap. The `Iter`
 associated type on `IntoPackets` is a state machine that owns the frame — no `Vec`,
@@ -148,8 +147,11 @@ cartouche declares `#![no_std]`. All encoding is done through iterators over
 stack-allocated state; all decoding takes caller-provided slices. Neither encoding nor
 decoding touches the heap.
 
-The `alloc` feature (implied by `std`) switches `Decoded<T, W>`'s warning storage from
-a fixed array to a `Vec<W>`, removing the 8-warning cap. All other behaviour is
+The `alloc` feature (implied by `std`) has two effects. First, `Decoded<T, W>`'s warning
+storage switches from a fixed `[Option<W>; 8]` array to a `Vec<W>`, removing the 8-warning
+cap. Second, `DynamicHdrInfoFrame::Unknown` retains the raw payload bytes in its `payload`
+field, making unrecognised formats re-encodable; in bare builds the payload is discarded.
+All encode and decode behaviour — including full HDR10+ and SL-HDR parsing — is otherwise
 identical across build tiers.
 
 ## Stack position

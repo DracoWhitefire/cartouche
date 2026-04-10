@@ -426,8 +426,11 @@ across all packets.
 
 #### Encoding
 
-`IntoPackets` for `DynamicHdrInfoFrame` is not yet implemented. It is planned once
-per-format structs (HDR10+, SL-HDR) are added; see the roadmap.
+`DynamicHdrInfoFrame` implements `IntoPackets`. `DynamicHdrIter` serialises the metadata
+payload using `BitWriter` and chunks it into 31-byte wire packets with the sequence number,
+total byte count, and format identifier in the header. In bare `no_std` builds the payload
+is staged in a `[u8; MAX_DYNAMIC_HDR_PAYLOAD]` stack buffer; in `alloc`/`std` builds it is
+held in a `Vec<u8>`.
 
 #### Decoding
 
@@ -436,10 +439,12 @@ per-format structs (HDR10+, SL-HDR) are added; see the roadmap.
 sequence. Once the caller has collected all packets,
 `DynamicHdrInfoFrame::decode_sequence(&[[u8; 31]])` is available to assemble the frame.
 
-The current implementation of `decode_sequence` extracts the format identifier from the
-first packet and returns `DynamicHdrInfoFrame::Unknown { format_id }` for all format
-identifiers, preserving the type code without attempting to parse format-specific
-metadata. Per-format parsing (HDR10+, SL-HDR) is planned; see the roadmap.
+`decode_sequence` accumulates the metadata chunks from all packets into a
+`[u8; MAX_DYNAMIC_HDR_PAYLOAD]` stack buffer, then dispatches on `format_id`. Format
+`0x04` (HDR10+) is parsed into `Hdr10PlusMetadata`; format `0x02` (SL-HDR) into
+`SlHdrMetadata`. Both are available in all build configurations, including bare `no_std`.
+Unrecognised format identifiers produce `DynamicHdrInfoFrame::Unknown { format_id }`,
+with the raw payload bytes retained in the `payload` field in `alloc`/`std` builds only.
 
 ---
 
@@ -448,13 +453,20 @@ metadata. Per-format parsing (HDR10+, SL-HDR) is planned; see the roadmap.
 `cartouche` declares `#![no_std]` and `#![forbid(unsafe_code)]`. All encoding is done
 through iterators over stack-allocated state; all decoding takes caller-provided slices.
 
-The `alloc` feature (implied by `std`) has one concrete effect on the core API:
-`Decoded<T, W>` switches its warning storage from a fixed `[Option<W>; 8]` array to a
-`Vec<W>`, removing the 8-warning cap. See the "Warning storage in `Decoded<T, W>`"
-section above for the full layout.
+The `alloc` feature (implied by `std`) has two concrete effects on the API:
 
-A possible future `alloc`-only convenience: collecting all packets from a frame into a
-`Vec<[u8; 31]>`. The core encode/decode API is always alloc-free regardless of features.
+1. `Decoded<T, W>` switches its warning storage from a fixed `[Option<W>; 8]` array to a
+   `Vec<W>`, removing the 8-warning cap. See the "Warning storage in `Decoded<T, W>`"
+   section above for the full layout.
+
+2. `DynamicHdrInfoFrame::Unknown` gains a `payload: Vec<u8>` field retaining the raw
+   metadata bytes, making unrecognised formats re-encodable. In bare `no_std` builds the
+   field is absent and the bytes are discarded. `SlHdrBody` similarly retains the
+   `extension` field only in `alloc`/`std` builds; in bare builds extension bytes are
+   consumed and discarded during decode.
+
+All other encode and decode behaviour — including full HDR10+ and SL-HDR parsing — is
+identical across all three build tiers.
 
 A `serde` feature flag (optional, no implied `std`) enables `Serialize` and `Deserialize`
 on all public types, matching the convention of the sibling crates. It has no effect on
