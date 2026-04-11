@@ -4,6 +4,7 @@
 /// unrecognised enum values — are reported as warnings on the returned frame rather
 /// than errors. `DecodeError` is returned only when the packet cannot be decoded at
 /// all.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DecodeError {
