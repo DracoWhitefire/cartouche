@@ -3,6 +3,7 @@
 /// Identifies the audio format being transmitted. `ReferToStream` defers to
 /// the audio bitstream's own header; this is the common case for compressed
 /// formats.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AudioCodingType {
@@ -41,6 +42,7 @@ pub enum AudioCodingType {
 }
 
 /// Audio channel count (CC field, PB1  erwinbits 2–0).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ChannelCount {
@@ -57,6 +59,7 @@ pub enum ChannelCount {
 }
 
 /// Audio sample frequency (SF field, PB2 bits 4–2).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SampleFrequency {
@@ -79,6 +82,7 @@ pub enum SampleFrequency {
 }
 
 /// Audio sample size (SS field, PB2 bits 1–0).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SampleSize {
@@ -94,6 +98,7 @@ pub enum SampleSize {
 
 /// LFE channel playback level relative to the other channels (LSV field,
 /// PB5 bits 6–3).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum LfePlaybackLevel {
@@ -112,6 +117,7 @@ pub enum LfePlaybackLevel {
 ///
 /// The `coding_ext` field is only meaningful when `coding_type` is
 /// [`AudioCodingType::Extension`]; in all other cases it should be `0`.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AudioInfoFrame {
     /// Audio coding type (CT, PB1 bits 6–3).
