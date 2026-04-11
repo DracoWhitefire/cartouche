@@ -149,3 +149,32 @@ fn reserved_bit_warning() {
         HdmiForumVsiWarning::ReservedFieldNonZero { byte: 7, bit: 0 }
     )));
 }
+
+#[cfg(feature = "serde")]
+#[test]
+fn hdmi_forum_vsi_round_trip() {
+    use super::*;
+    use display_types::HdmiForumFrl;
+    use display_types::cea861::hdmi_forum::HdmiDscMaxSlices;
+    let vsi = HdmiForumVsi {
+        allm: true,
+        frl_rate: HdmiForumFrl::Rate8Gbps4Lanes,
+        fapa_start_location: true,
+        fva: false,
+        vrr_en: true,
+        m_const: false,
+        qms_en: true,
+        neg_mvrr: false,
+        m_vrr: 120,
+        dsc_1p2: true,
+        dsc_native_420: false,
+        dsc_all_bpc: true,
+        dsc_max_frl_rate: HdmiForumFrl::NotSupported,
+        dsc_max_slices: HdmiDscMaxSlices::NotSupported,
+        dsc_10bpc: true,
+        dsc_12bpc: false,
+    };
+    let json = serde_json::to_string(&vsi).unwrap();
+    let back: HdmiForumVsi = serde_json::from_str(&json).unwrap();
+    assert_eq!(vsi, back);
+}

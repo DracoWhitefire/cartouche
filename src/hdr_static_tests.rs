@@ -153,3 +153,25 @@ fn unknown_descriptor_id_warns() {
         }
     ));
 }
+
+#[cfg(feature = "serde")]
+#[test]
+fn hdr_static_info_frame_round_trip() {
+    use super::*;
+    let frame = HdrStaticInfoFrame {
+        eotf: Eotf::Pq,
+        metadata: StaticMetadata::Type1(StaticMetadataType1 {
+            primaries_green: [0x8500, 0x6600],
+            primaries_blue: [0x1D00, 0x0900],
+            primaries_red: [0x8A00, 0x3E00],
+            white_point: [0x3D13, 0x4042],
+            max_mastering_luminance: 1000,
+            min_mastering_luminance: 1,
+            max_cll: 1000,
+            max_fall: 400,
+        }),
+    };
+    let json = serde_json::to_string(&frame).unwrap();
+    let back: HdrStaticInfoFrame = serde_json::from_str(&json).unwrap();
+    assert_eq!(frame, back);
+}

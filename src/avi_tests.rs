@@ -345,3 +345,36 @@ fn short_packet_leaves_bar_data_zeroed() {
     assert_eq!(decoded.value.left_bar, 0);
     assert_eq!(decoded.value.right_bar, 0);
 }
+
+#[cfg(feature = "serde")]
+#[test]
+fn avi_info_frame_round_trip() {
+    use crate::avi::{
+        BarInfo, Colorimetry, ExtendedColorimetry, ItContentType, NonUniformScaling,
+        PictureAspectRatio, RgbQuantization, ScanInfo, YccQuantization,
+    };
+    let frame = AviInfoFrame {
+        color_format: ColorFormat::Rgb444,
+        active_format_present: true,
+        bar_info: BarInfo::BothPresent,
+        scan_info: ScanInfo::Underscanned,
+        colorimetry: Colorimetry::Bt709,
+        extended_colorimetry: ExtendedColorimetry::Bt2020YCC,
+        picture_aspect_ratio: PictureAspectRatio::SixteenByNine,
+        active_format_aspect_ratio: 8,
+        it_content: true,
+        rgb_quantization: RgbQuantization::FullRange,
+        non_uniform_scaling: NonUniformScaling::Both,
+        vic: 16,
+        ycc_quantization: YccQuantization::LimitedRange,
+        it_content_type: ItContentType::Game,
+        pixel_repetition: 0,
+        top_bar: 10,
+        bottom_bar: 20,
+        left_bar: 30,
+        right_bar: 40,
+    };
+    let json = serde_json::to_string(&frame).unwrap();
+    let back: AviInfoFrame = serde_json::from_str(&json).unwrap();
+    assert_eq!(frame, back);
+}

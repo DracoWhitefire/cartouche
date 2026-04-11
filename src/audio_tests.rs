@@ -210,3 +210,22 @@ fn refer_to_stream_fields_round_trip() {
     assert!(decoded.iter_warnings().next().is_none());
     assert_eq!(decoded.value, frame);
 }
+
+#[cfg(feature = "serde")]
+#[test]
+fn audio_info_frame_round_trip() {
+    use super::*;
+    let frame = AudioInfoFrame {
+        coding_type: AudioCodingType::Lpcm,
+        channel_count: ChannelCount::Count(6),
+        sample_freq: SampleFrequency::Hz48000,
+        sample_size: SampleSize::Bits24,
+        coding_ext: 0,
+        channel_allocation: 0x0B,
+        lfe_playback_level: LfePlaybackLevel::Plus10Db,
+        downmix_inhibit: true,
+    };
+    let json = serde_json::to_string(&frame).unwrap();
+    let back: AudioInfoFrame = serde_json::from_str(&json).unwrap();
+    assert_eq!(frame, back);
+}

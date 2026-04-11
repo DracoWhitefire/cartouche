@@ -299,3 +299,90 @@ fn decode_dynamic_hdr_warning_lifted() {
             .any(|w| matches!(w, Warning::DynamicHdr(_)))
     );
 }
+
+#[cfg(feature = "serde")]
+mod serde_tests {
+    use super::*;
+    use crate::warn::{
+        AudioWarning, AviWarning, DynamicHdrWarning, HdmiForumVsiWarning, HdrStaticWarning,
+    };
+
+    #[test]
+    fn decode_error_variants_serialize() {
+        let e = DecodeError::Truncated { claimed: 28 };
+        let s = serde_json::to_string(&e).unwrap();
+        assert!(s.contains("Truncated"));
+
+        let e = DecodeError::EmptySequence;
+        let s = serde_json::to_string(&e).unwrap();
+        assert!(s.contains("EmptySequence"));
+
+        let e = DecodeError::MalformedPayload;
+        let s = serde_json::to_string(&e).unwrap();
+        assert!(s.contains("MalformedPayload"));
+    }
+
+    #[test]
+    fn warning_variants_serialize() {
+        // AviWarning (all three variants)
+        let w = AviWarning::ChecksumMismatch { expected: 0xAB, found: 0xCD };
+        assert!(serde_json::to_string(&w).unwrap().contains("ChecksumMismatch"));
+        let w = AviWarning::ReservedFieldNonZero { byte: 4, bit: 3 };
+        assert!(serde_json::to_string(&w).unwrap().contains("ReservedFieldNonZero"));
+        let w = AviWarning::UnknownEnumValue { field: "colorimetry", raw: 0xFF };
+        assert!(serde_json::to_string(&w).unwrap().contains("UnknownEnumValue"));
+
+        // AudioWarning
+        let w = AudioWarning::ChecksumMismatch { expected: 0, found: 1 };
+        assert!(serde_json::to_string(&w).is_ok());
+
+        // HdrStaticWarning
+        let w = HdrStaticWarning::ReservedFieldNonZero { byte: 1, bit: 7 };
+        assert!(serde_json::to_string(&w).is_ok());
+
+        // HdmiForumVsiWarning
+        let w = HdmiForumVsiWarning::UnknownEnumValue { field: "frl_rate", raw: 9 };
+        assert!(serde_json::to_string(&w).is_ok());
+
+        // DynamicHdrWarning extra variants
+        let w = DynamicHdrWarning::OutOfOrderPacket { index: 1, found: 3 };
+        assert!(serde_json::to_string(&w).unwrap().contains("OutOfOrderPacket"));
+        let w = DynamicHdrWarning::InconsistentTotalBytes { packet: 1, expected: 100, found: 99 };
+        assert!(serde_json::to_string(&w).is_ok());
+        let w = DynamicHdrWarning::InconsistentFormatId { packet: 2, expected: 0x04, found: 0x02 };
+        assert!(serde_json::to_string(&w).is_ok());
+
+        // Unified Warning wrapper
+        let w = Warning::Avi(AviWarning::ChecksumMismatch { expected: 0, found: 1 });
+        assert!(serde_json::to_string(&w).unwrap().contains("Avi"));
+        let w = Warning::DynamicHdr(DynamicHdrWarning::OutOfOrderPacket { index: 0, found: 1 });
+        assert!(serde_json::to_string(&w).is_ok());
+    }
+
+    #[test]
+    fn info_frame_packet_variants_round_trip() {
+        use crate::frame::InfoFramePacket;
+        use crate::dynamic_hdr::DynamicHdrFragment;
+
+        let p = InfoFramePacket::Unknown {
+            type_code: 0xAB,
+            version: 0x01,
+            payload: [0xCC; 27],
+        };
+        let json = serde_json::to_string(&p).unwrap();
+        let back: InfoFramePacket = serde_json::from_str(&json).unwrap();
+        assert_eq!(p, back);
+
+        let frag = DynamicHdrFragment {
+            seq_num: 0,
+            total_bytes: 23,
+            format_id: 0x04,
+            chunk: [0xAA; 23],
+            chunk_len: 23,
+        };
+        let p = InfoFramePacket::DynamicHdrFragment(frag);
+        let json = serde_json::to_string(&p).unwrap();
+        let back: InfoFramePacket = serde_json::from_str(&json).unwrap();
+        assert_eq!(p, back);
+    }
+}

@@ -1542,3 +1542,158 @@ fn slhdr_max_size_encode_no_panic() {
     // Must not panic.
     let _pkts: alloc::vec::Vec<[u8; 31]> = frame.into_packets().value.collect();
 }
+
+// ---------------------------------------------------------------------------
+// Serde round-trip tests
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "serde")]
+mod serde_tests {
+    use super::*;
+
+    // -- SlHdrTable127 (manual impl) ----------------------------------------
+
+    #[test]
+    fn slhdr_table127_round_trip() {
+        let mut table = SlHdrTable127::default();
+        table.count = 3;
+        table.x[0] = 100;
+        table.x[1] = 200;
+        table.x[2] = 300;
+        table.y[0] = 10;
+        table.y[1] = 20;
+        table.y[2] = 30;
+
+        let json = serde_json::to_string(&table).unwrap();
+        let back: SlHdrTable127 = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.count, 3);
+        assert_eq!(back.x[..3], [100, 200, 300]);
+        assert_eq!(back.y[..3], [10, 20, 30]);
+    }
+
+    #[test]
+    fn slhdr_table127_zero_entries() {
+        let table = SlHdrTable127::default();
+        let json = serde_json::to_string(&table).unwrap();
+        let back: SlHdrTable127 = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.count, 0);
+    }
+
+    #[test]
+    fn slhdr_table127_missing_field_is_error() {
+        let err = serde_json::from_str::<SlHdrTable127>(r#"{"count":1,"x":[10]}"#);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn slhdr_table127_too_many_elements_is_error() {
+        // 128 elements in x — one over the limit
+        let xs: alloc::vec::Vec<u16> = (0u16..128).collect();
+        let json = serde_json::json!({ "count": 0, "x": xs, "y": [] });
+        let err = serde_json::from_value::<SlHdrTable127>(json);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn slhdr_table127_wrong_outer_type_is_error() {
+        // Triggers T127Visitor::expecting — outer value is not a struct.
+        let err = serde_json::from_str::<SlHdrTable127>("42");
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn slhdr_table127_wrong_array_type_is_error() {
+        // Triggers Seq127Visitor::expecting — x field is not a sequence.
+        let err = serde_json::from_str::<SlHdrTable127>(r#"{"count":0,"x":42,"y":[]}"#);
+        assert!(err.is_err());
+    }
+
+    // -- SlHdrMetadata round-trip -------------------------------------------
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn slhdr_metadata_round_trip() {
+        let (_, meta) = make_slhdr_full_body_payload();
+        let json = serde_json::to_string(&meta).unwrap();
+        let back: SlHdrMetadata = serde_json::from_str(&json).unwrap();
+        assert_eq!(meta, back);
+    }
+
+    #[test]
+    fn slhdr_cancelled_round_trip() {
+        let meta = SlHdrMetadata {
+            itu_t_t35_country_code: 0xB5,
+            terminal_provider_code: 0x003C,
+            terminal_provider_oriented_code_message_idc: 0x01,
+            sl_hdr_mode_value_minus1: 0,
+            sl_hdr_spec_major_version_idc: 1,
+            sl_hdr_spec_minor_version_idc: 0,
+            sl_hdr_cancel_flag: true,
+            body: None,
+        };
+        let json = serde_json::to_string(&meta).unwrap();
+        let back: SlHdrMetadata = serde_json::from_str(&json).unwrap();
+        assert_eq!(meta, back);
+    }
+
+    // -- Hdr10PlusMetadata round-trip ---------------------------------------
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn hdr10plus_metadata_round_trip() {
+        let (_, meta) = make_full_hdr10plus_payload();
+        let json = serde_json::to_string(&meta).unwrap();
+        let back: Hdr10PlusMetadata = serde_json::from_str(&json).unwrap();
+        assert_eq!(meta, back);
+    }
+
+    // -- DynamicHdrInfoFrame variants --------------------------------------
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn dynamic_hdr_info_frame_hdr10plus_round_trip() {
+        let (_, meta) = make_full_hdr10plus_payload();
+        let frame = DynamicHdrInfoFrame::Hdr10Plus(meta);
+        let json = serde_json::to_string(&frame).unwrap();
+        let back: DynamicHdrInfoFrame = serde_json::from_str(&json).unwrap();
+        assert_eq!(frame, back);
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn dynamic_hdr_info_frame_slhdr_round_trip() {
+        let (_, meta) = make_slhdr_full_body_payload();
+        let frame = DynamicHdrInfoFrame::SlHdr(meta);
+        let json = serde_json::to_string(&frame).unwrap();
+        let back: DynamicHdrInfoFrame = serde_json::from_str(&json).unwrap();
+        assert_eq!(frame, back);
+    }
+
+    #[test]
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    fn dynamic_hdr_info_frame_unknown_round_trip() {
+        let frame = DynamicHdrInfoFrame::Unknown {
+            format_id: 0x99,
+            payload: alloc::vec![0xAA, 0xBB, 0xCC],
+        };
+        let json = serde_json::to_string(&frame).unwrap();
+        let back: DynamicHdrInfoFrame = serde_json::from_str(&json).unwrap();
+        assert_eq!(frame, back);
+    }
+
+    // -- DynamicHdrFragment ------------------------------------------------
+
+    #[test]
+    fn dynamic_hdr_fragment_round_trip() {
+        let frag = DynamicHdrFragment {
+            seq_num: 2,
+            total_bytes: 46,
+            format_id: 0x04,
+            chunk: [0xAB; 23],
+            chunk_len: 23,
+        };
+        let json = serde_json::to_string(&frag).unwrap();
+        let back: DynamicHdrFragment = serde_json::from_str(&json).unwrap();
+        assert_eq!(frag, back);
+    }
+}
