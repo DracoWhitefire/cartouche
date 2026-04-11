@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-11
+
+### Added
+
+- **HDR10+ decode and encode** — `Hdr10PlusMetadata` struct covering all ETSI TS 103 433-1
+  fields: application identifier, distribution function, window descriptors, Bezier curve
+  anchors, and tone mapping parameters. `DynamicHdrInfoFrame::decode_sequence` now returns
+  `DynamicHdrInfoFrame::Hdr10Plus(Hdr10PlusMetadata)` for format identifier `0x04`.
+  `IntoPackets` encodes a full `Hdr10PlusMetadata` back to the wire packet sequence.
+- **SL-HDR decode and encode** — `SlHdrMetadata` struct covering ETSI TS 103 433-2 fields:
+  mode, payload type, body fields (`SlHdrBody`), and lookup tables (`SlHdrTable127`).
+  `DynamicHdrInfoFrame::decode_sequence` now returns `DynamicHdrInfoFrame::SlHdr(SlHdrMetadata)`
+  for format identifier `0x02`. `IntoPackets` encodes a full `SlHdrMetadata` back to the
+  wire packet sequence.
+- **`IntoPackets` for `DynamicHdrInfoFrame`** — dynamic HDR frames can now be encoded to
+  a packet sequence, completing the encode–decode symmetry for all InfoFrame types.
+- **`serde` feature** — opt-in `Serialize` and `Deserialize` implementations on all public
+  types. Warning enums derive `Serialize` only (their `field: &'static str` field makes
+  `Deserialize` derivation unsound). `SlHdrTable127` uses a hand-written implementation
+  to handle its `[u16; 127]` array correctly under all serde backends.
+- **SLSA Build Level 2 provenance** — release artifacts are attested via
+  `actions/attest-build-provenance` and verified with
+  `gh attestation verify <file> --repo DracoWhitefire/cartouche`.
+
+### Changed
+
+- **`DynamicHdrInfoFrame` dispatch** — `decode_sequence` previously returned
+  `DynamicHdrInfoFrame::Unknown { format_id: 0x04 }` for HDR10+ and
+  `DynamicHdrInfoFrame::Unknown { format_id: 0x02 }` for SL-HDR. It now returns the
+  typed `Hdr10Plus` and `SlHdr` variants respectively. Code that matched `Unknown` for
+  these format identifiers must be updated. All other format identifiers continue to
+  return `Unknown`.
+
 ## [0.1.0] - 2026-04-07
 
 ### Added
