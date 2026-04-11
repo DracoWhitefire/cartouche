@@ -176,7 +176,7 @@ flowchart LR
 
 ## Verifying releases
 
-Each release is built on GitHub Actions and attested with
+Releases from v0.2.0 onwards are built on GitHub Actions and attested with
 [SLSA Build Level 2](https://slsa.dev) provenance. To verify a release
 `.crate` against its signed provenance, install the
 [GitHub CLI](https://cli.github.com/) and run:
