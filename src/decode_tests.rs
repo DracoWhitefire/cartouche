@@ -325,15 +325,36 @@ mod serde_tests {
     #[test]
     fn warning_variants_serialize() {
         // AviWarning (all three variants)
-        let w = AviWarning::ChecksumMismatch { expected: 0xAB, found: 0xCD };
-        assert!(serde_json::to_string(&w).unwrap().contains("ChecksumMismatch"));
+        let w = AviWarning::ChecksumMismatch {
+            expected: 0xAB,
+            found: 0xCD,
+        };
+        assert!(
+            serde_json::to_string(&w)
+                .unwrap()
+                .contains("ChecksumMismatch")
+        );
         let w = AviWarning::ReservedFieldNonZero { byte: 4, bit: 3 };
-        assert!(serde_json::to_string(&w).unwrap().contains("ReservedFieldNonZero"));
-        let w = AviWarning::UnknownEnumValue { field: "colorimetry", raw: 0xFF };
-        assert!(serde_json::to_string(&w).unwrap().contains("UnknownEnumValue"));
+        assert!(
+            serde_json::to_string(&w)
+                .unwrap()
+                .contains("ReservedFieldNonZero")
+        );
+        let w = AviWarning::UnknownEnumValue {
+            field: "colorimetry",
+            raw: 0xFF,
+        };
+        assert!(
+            serde_json::to_string(&w)
+                .unwrap()
+                .contains("UnknownEnumValue")
+        );
 
         // AudioWarning
-        let w = AudioWarning::ChecksumMismatch { expected: 0, found: 1 };
+        let w = AudioWarning::ChecksumMismatch {
+            expected: 0,
+            found: 1,
+        };
         assert!(serde_json::to_string(&w).is_ok());
 
         // HdrStaticWarning
@@ -341,19 +362,37 @@ mod serde_tests {
         assert!(serde_json::to_string(&w).is_ok());
 
         // HdmiForumVsiWarning
-        let w = HdmiForumVsiWarning::UnknownEnumValue { field: "frl_rate", raw: 9 };
+        let w = HdmiForumVsiWarning::UnknownEnumValue {
+            field: "frl_rate",
+            raw: 9,
+        };
         assert!(serde_json::to_string(&w).is_ok());
 
         // DynamicHdrWarning extra variants
         let w = DynamicHdrWarning::OutOfOrderPacket { index: 1, found: 3 };
-        assert!(serde_json::to_string(&w).unwrap().contains("OutOfOrderPacket"));
-        let w = DynamicHdrWarning::InconsistentTotalBytes { packet: 1, expected: 100, found: 99 };
+        assert!(
+            serde_json::to_string(&w)
+                .unwrap()
+                .contains("OutOfOrderPacket")
+        );
+        let w = DynamicHdrWarning::InconsistentTotalBytes {
+            packet: 1,
+            expected: 100,
+            found: 99,
+        };
         assert!(serde_json::to_string(&w).is_ok());
-        let w = DynamicHdrWarning::InconsistentFormatId { packet: 2, expected: 0x04, found: 0x02 };
+        let w = DynamicHdrWarning::InconsistentFormatId {
+            packet: 2,
+            expected: 0x04,
+            found: 0x02,
+        };
         assert!(serde_json::to_string(&w).is_ok());
 
         // Unified Warning wrapper
-        let w = Warning::Avi(AviWarning::ChecksumMismatch { expected: 0, found: 1 });
+        let w = Warning::Avi(AviWarning::ChecksumMismatch {
+            expected: 0,
+            found: 1,
+        });
         assert!(serde_json::to_string(&w).unwrap().contains("Avi"));
         let w = Warning::DynamicHdr(DynamicHdrWarning::OutOfOrderPacket { index: 0, found: 1 });
         assert!(serde_json::to_string(&w).is_ok());
@@ -361,8 +400,8 @@ mod serde_tests {
 
     #[test]
     fn info_frame_packet_variants_round_trip() {
-        use crate::frame::InfoFramePacket;
         use crate::dynamic_hdr::DynamicHdrFragment;
+        use crate::frame::InfoFramePacket;
 
         let p = InfoFramePacket::Unknown {
             type_code: 0xAB,
