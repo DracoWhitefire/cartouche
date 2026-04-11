@@ -6,6 +6,7 @@ use crate::warn::DynamicHdrWarning;
 // ---------------------------------------------------------------------------
 
 /// HDR10+ dynamic metadata (ETSI TS 103 433-1, format identifier `0x04`).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hdr10PlusMetadata {
     /// Application-specific identifier (8 bits).
@@ -42,6 +43,7 @@ pub struct Hdr10PlusMetadata {
 ///
 /// Stored as a fixed array with a count rather than a `Vec` to allow `no_std`
 /// without alloc. Only `windows[..count as usize]` is valid.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Hdr10PlusWindows {
     /// Number of valid windows (1–3).
@@ -51,6 +53,7 @@ pub struct Hdr10PlusWindows {
 }
 
 /// Tone-mapping parameters for one window.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Hdr10PlusWindow {
     /// Upper-left corner X coordinate (16 bits).
@@ -95,6 +98,7 @@ pub struct Hdr10PlusWindow {
 }
 
 /// MaxRGB distribution percentages and percentiles.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DistributionMaxrgb {
     /// Number of valid distribution entries (up to 15).
@@ -106,6 +110,7 @@ pub struct DistributionMaxrgb {
 }
 
 /// Knee-point coordinates for the tone-mapping curve.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KneePoint {
     /// X coordinate (12 bits).
@@ -115,6 +120,7 @@ pub struct KneePoint {
 }
 
 /// Bezier curve anchors for the tone-mapping curve.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct BezierAnchors {
     /// Number of valid anchors (up to 9).
@@ -125,6 +131,7 @@ pub struct BezierAnchors {
 
 /// Actual peak luminance table, used for both targeted system display and
 /// mastering display.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ActualPeakLuminance {
     /// Number of rows (5 bits, up to 25).
