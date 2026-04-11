@@ -4,10 +4,7 @@
 /// unrecognised enum values — are reported as warnings on the returned frame rather
 /// than errors. `DecodeError` is returned only when the packet cannot be decoded at
 /// all.
-///
-/// The only current variant is [`DecodeError::Truncated`], which fires when the
-/// `length` field in the packet header claims more payload bytes than the 31-byte
-/// packet can hold (i.e. `length > 27`).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DecodeError {
@@ -22,4 +19,19 @@ pub enum DecodeError {
         /// The value declared in the packet header's `length` field.
         claimed: u8,
     },
+    /// [`DynamicHdrInfoFrame::decode_sequence`](crate::dynamic_hdr::DynamicHdrInfoFrame::decode_sequence)
+    /// was called with an empty packet slice.
+    ///
+    /// A Dynamic HDR sequence always contains at least one packet. An empty slice
+    /// indicates a caller error: the sequence has not been fully collected yet, or
+    /// no packets were received.
+    EmptySequence,
+    /// The assembled metadata payload is too short to contain the fields
+    /// required by its declared format.
+    ///
+    /// Distinct from [`Truncated`](DecodeError::Truncated), which fires when an
+    /// individual packet's `length` header field is out of range. This variant
+    /// fires when all packets are individually well-formed but the concatenated
+    /// payload bytes run out before all mandatory fields have been read.
+    MalformedPayload,
 }

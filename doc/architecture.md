@@ -426,8 +426,11 @@ across all packets.
 
 #### Encoding
 
-`IntoPackets` for `DynamicHdrInfoFrame` is not yet implemented. It is planned once
-per-format structs (HDR10+, SL-HDR) are added; see the roadmap.
+`DynamicHdrInfoFrame` implements `IntoPackets`. `DynamicHdrIter` serialises the metadata
+payload using `BitWriter` and chunks it into 31-byte wire packets with the sequence number,
+total byte count, and format identifier in the header. In bare `no_std` builds the payload
+is staged in a `[u8; MAX_DYNAMIC_HDR_PAYLOAD]` stack buffer; in `alloc`/`std` builds it is
+held in a `Vec<u8>`.
 
 #### Decoding
 
@@ -436,10 +439,12 @@ per-format structs (HDR10+, SL-HDR) are added; see the roadmap.
 sequence. Once the caller has collected all packets,
 `DynamicHdrInfoFrame::decode_sequence(&[[u8; 31]])` is available to assemble the frame.
 
-The current implementation of `decode_sequence` extracts the format identifier from the
-first packet and returns `DynamicHdrInfoFrame::Unknown { format_id }` for all format
-identifiers, preserving the type code without attempting to parse format-specific
-metadata. Per-format parsing (HDR10+, SL-HDR) is planned; see the roadmap.
+`decode_sequence` accumulates the metadata chunks from all packets into a
+`[u8; MAX_DYNAMIC_HDR_PAYLOAD]` stack buffer, then dispatches on `format_id`. Format
+`0x04` (HDR10+) is parsed into `Hdr10PlusMetadata`; format `0x02` (SL-HDR) into
+`SlHdrMetadata`. Both are available in all build configurations, including bare `no_std`.
+Unrecognised format identifiers produce `DynamicHdrInfoFrame::Unknown { format_id }`,
+with the raw payload bytes retained in the `payload` field in `alloc`/`std` builds only.
 
 ---
 
@@ -448,13 +453,20 @@ metadata. Per-format parsing (HDR10+, SL-HDR) is planned; see the roadmap.
 `cartouche` declares `#![no_std]` and `#![forbid(unsafe_code)]`. All encoding is done
 through iterators over stack-allocated state; all decoding takes caller-provided slices.
 
-The `alloc` feature (implied by `std`) has one concrete effect on the core API:
-`Decoded<T, W>` switches its warning storage from a fixed `[Option<W>; 8]` array to a
-`Vec<W>`, removing the 8-warning cap. See the "Warning storage in `Decoded<T, W>`"
-section above for the full layout.
+The `alloc` feature (implied by `std`) has two concrete effects on the API:
 
-A possible future `alloc`-only convenience: collecting all packets from a frame into a
-`Vec<[u8; 31]>`. The core encode/decode API is always alloc-free regardless of features.
+1. `Decoded<T, W>` switches its warning storage from a fixed `[Option<W>; 8]` array to a
+   `Vec<W>`, removing the 8-warning cap. See the "Warning storage in `Decoded<T, W>`"
+   section above for the full layout.
+
+2. `DynamicHdrInfoFrame::Unknown` gains a `payload: Vec<u8>` field retaining the raw
+   metadata bytes, making unrecognised formats re-encodable. In bare `no_std` builds the
+   field is absent and the bytes are discarded. `SlHdrBody` similarly retains the
+   `extension` field only in `alloc`/`std` builds; in bare builds extension bytes are
+   consumed and discarded during decode.
+
+All other encode and decode behaviour — including full HDR10+ and SL-HDR parsing — is
+identical across all three build tiers.
 
 A `serde` feature flag (optional, no implied `std`) enables `Serialize` and `Deserialize`
 on all public types, matching the convention of the sibling crates. It has no effect on
@@ -500,110 +512,6 @@ encoding or decoding behaviour.
   successfully (possibly with warnings) or returns `DecodeError::Truncated` — no other
   outcome is acceptable; and encode followed by decode is identity for well-formed
   frames.
-
----
-
-## Implementation Plan
-
-### Phase 0 — Project infrastructure
-
-Before any InfoFrame logic:
-
-- `Cargo.toml`: crate metadata (`name`, `version`, `edition`, `rust-version`,
-  `description`, `repository`, `license`, `readme`, `keywords`, `categories`),
-  `[dependencies]` (`display-types`), feature flags (`alloc`, `std`).
-- `#![no_std]`, `#![forbid(unsafe_code)]`, `#![deny(missing_docs)]` in `lib.rs`.
-- `LICENSE` (MPL-2.0).
-- `README.md` with badges (CI, crates.io, docs.rs, license, rustc), crate role, usage
-  example, stack position diagram, feature table, documentation links.
-- `CHANGELOG.md` in Keep a Changelog format.
-- `CODE_OF_CONDUCT.md` and `CONTRIBUTING.md`, matching the sibling crates.
-- `.github/workflows/ci.yml`: fmt check, clippy (`-D warnings`), docs
-  (`-D missing_docs`), test, no_std build check, alloc-only build check.
-- `.github/workflows/fuzz.yml`: matrix over fuzz targets; 60-second smoke run on PRs
-  and pushes, 1-hour deep run on weekly schedule and manual trigger; crash artifacts
-  uploaded on failure. After each deep run, each matrix job uploads its minimised corpus
-  as a workflow artifact; a final `needs: [fuzz]` job downloads all corpora, commits any
-  changes, and opens a `ci/fuzz-corpus` PR if the corpus changed — one PR per deep run
-  covering all targets, following the same `ci/` branch convention as the coverage
-  ratchet.
-- `.github/workflows/audit.yml`: `rustsec/audit-check` on Cargo.toml / Cargo.lock
-  changes.
-- `.github/workflows/publish.yml`: tag-triggered publish gated to commits reachable
-  from `main`, running the full CI suite before `cargo publish`.
-- Coverage ratchet in `ci.yml`: `cargo-llvm-cov` measurement, baseline check against
-  `.coverage-baseline`, automatic `ci/coverage-ratchet` PR on improvement.
-- `doc/` directory: `setup.md`, `testing.md`, `roadmap.md` (this file is
-  `architecture.md`).
-- `.coverage-baseline` file.
-
-### Phase 1 — Core types and infrastructure
-
-The shared machinery that all InfoFrame types depend on:
-
-- `IntoPackets` trait: iterator-based encoding interface, yields `[u8; 31]`.
-- Checksum computation: `compute_checksum(header_and_payload: &[u8]) -> u8`, used by
-  all encode paths.
-- Checksum verification: called on every decode path, attaches a `ChecksumMismatch`
-  variant on the per-frame warning type on mismatch.
-- `DecodeError` type: `Truncated` is the only hard decode failure.
-- Per-frame warning enums (`AviWarning`, `AudioWarning`, `HdrStaticWarning`,
-  `HdmiForumVsiWarning`, `DynamicHdrWarning`), each with `ChecksumMismatch`,
-  `ReservedFieldNonZero`, and `UnknownEnumValue { field: &'static str, raw: u8 }` variants.
-- Unified `Warning` enum wrapping the five per-frame types, used by the top-level
-  `decode` dispatch.
-- `Decoded<T, W>` type: pairs a decoded frame with its warnings. The success side of
-  `Result<Decoded<T, W>, DecodeError>`. Warning storage is feature-gated: `Vec<W>` with
-  `alloc`/`std`, fixed `[Option<W>; 8]` + `num_warnings` in bare `no_std`. Portable
-  access via `iter_warnings()` in both builds.
-- `InfoFrame` enum (encode path): all five variants and `Unknown`; implements `IntoPackets`.
-- `InfoFramePacket` enum (decode path): same single-packet variants, plus
-  `DynamicHdrFragment` in place of `DynamicHdr`.
-- Top-level `decode(packet: &[u8; 31]) -> Result<Decoded<InfoFramePacket, Warning>, DecodeError>`.
-
-### Phase 2 — Traditional InfoFrame types
-
-Implement encode and decode for each single-packet InfoFrame type. Each type gets:
-
-- a typed struct with named fields,
-- `IntoPackets` impl that builds the 31-byte packet, computes the checksum,
-- `decode(&[u8; 31]) -> Result<Decoded<Self, XxxWarning>, DecodeError>` (where `Xxx` is the frame type),
-- a variant in `InfoFrame`,
-- rustdoc on every public item,
-- unit tests covering round-trip encode/decode, out-of-spec field warnings, and
-  checksum mismatch handling.
-
-Order of implementation (roughly increasing complexity):
-
-1. `AudioInfoFrame` — straightforward field mapping.
-2. `HdrStaticInfoFrame` — EOTF, metadata type, static metadata fields.
-3. `HdmiForumVsi` — ALLM, VRR, DSC, FRL fields; more fields but regular structure.
-4. `AviInfoFrame` — largest, most complex, highest-priority for correctness. Extended
-   colorimetry and ACE field chain, bar data conditionals, RGB vs. YCC quantization
-   range handling.
-
-### Phase 3 — Dynamic HDR InfoFrame
-
-- `DynamicHdrInfoFrame` typed struct, wrapping per-format variants.
-- `IntoPackets` impl: packet boundary alignment, sequence numbering, per-packet byte
-  count and format identifier fields, final partial-chunk handling.
-- `decode_sequence(&[[u8; 31]]) -> Result<Decoded<DynamicHdrInfoFrame, DynamicHdrWarning>, DecodeError>`:
-  assembles payload from the packet sequence, dispatches on format identifier.
-- `DynamicHdrInfoFrame` variant in `InfoFrame`.
-- Stateful decode context for callers that receive packets one at a time and need to
-  determine when a sequence is complete.
-- HDR10+ (ETSI TS 103 433) format: full metadata struct.
-- SL-HDR format: full metadata struct.
-- `Unknown { format_id: u8, payload: ... }` catch-all for unrecognised format identifiers.
-
-### Phase 4 — Documentation and examples
-
-- `doc/testing.md`: testing strategy, round-trip property testing approach, how to write
-  tests against the simulated decode path.
-- Fuzz targets (`fuzz/fuzz_targets/`): one target per InfoFrame type exercising the
-  no-panic and round-trip invariants. Run via `cargo fuzz`.
-- Simulation example (`examples/roundtrip` or similar): construct one of each InfoFrame
-  type, encode to packets, decode from packets, assert field equality.
-- `doc/roadmap.md`: what is released, what is planned.
-- Pre-publish docs review: verify every public item has a rustdoc comment, all links
-  resolve, README matches the actual API.
+- **Attested releases.** Every release is published through a GitHub Actions workflow
+  that signs the `.crate` package with [SLSA Build Level 2](https://slsa.dev) provenance.
+  Verify with `gh attestation verify <file> --repo DracoWhitefire/cartouche`.
