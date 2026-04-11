@@ -24,6 +24,7 @@ pub(crate) const HDMI_FORUM_OUI: [u8; 3] = [0xD8, 0x5D, 0xC4];
 /// - PB6: `m_vrr`\[7:0\]
 /// - PB7: `dsc_1p2`\[7\], `dsc_native_420`\[6\], `dsc_all_bpc`\[5\], `dsc_max_frl_rate`\[2:0\]
 /// - PB8: `dsc_12bpc`\[7\], `dsc_10bpc`\[6\], `dsc_max_slices`\[3:0\]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HdmiForumVsi {
     // ---- PB4: general flags ----

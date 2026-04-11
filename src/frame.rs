@@ -29,6 +29,7 @@ use crate::warn::Warning;
 /// use in no_std environments; callers who need a pointer-sized handle can
 /// box the whole `InfoFrame` at the call site.
 #[allow(clippy::large_enum_variant)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InfoFrame {
@@ -69,6 +70,7 @@ pub enum InfoFrame {
 /// Once a complete sequence of Dynamic HDR fragments has been collected, pass
 /// the raw packets to `DynamicHdrInfoFrame::decode_sequence` to assemble the
 /// full frame.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InfoFramePacket {

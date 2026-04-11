@@ -3,6 +3,7 @@
 /// A warning indicates an anomaly in the packet that does not prevent decoding.
 /// The frame is returned alongside any warnings; the caller decides how to act
 /// on them.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AviWarning {
@@ -43,6 +44,7 @@ pub enum AviWarning {
 ///
 /// See [`AviWarning`] for variant documentation — the variants are identical
 /// across all per-frame warning types.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AudioWarning {
@@ -73,6 +75,7 @@ pub enum AudioWarning {
 ///
 /// See [`AviWarning`] for variant documentation — the variants are identical
 /// across all per-frame warning types.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum HdrStaticWarning {
@@ -103,6 +106,7 @@ pub enum HdrStaticWarning {
 ///
 /// See [`AviWarning`] for variant documentation — the variants are identical
 /// across all per-frame warning types.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum HdmiForumVsiWarning {
@@ -132,6 +136,7 @@ pub enum HdmiForumVsiWarning {
 /// Warnings produced while decoding a Dynamic HDR InfoFrame.
 ///
 /// See [`AviWarning`] for variant documentation of the first three variants.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DynamicHdrWarning {
@@ -201,6 +206,7 @@ pub enum DynamicHdrWarning {
 /// Callers that decode a specific InfoFrame type directly (e.g.
 /// [`AviInfoFrame::decode`](crate::avi::AviInfoFrame::decode)) receive the
 /// per-frame warning type and do not need this wrapper.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Warning {

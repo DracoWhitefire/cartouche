@@ -7,6 +7,7 @@ use crate::warn::DynamicHdrWarning;
 
 /// SL-HDR dynamic metadata (ETSI TS 103 433-1 Table A.1, format identifier
 /// `0x02`).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlHdrMetadata {
     /// `itu_t_t35_country_code` (8 bits).
@@ -28,6 +29,7 @@ pub struct SlHdrMetadata {
 }
 
 /// Main SL-HDR parameter block, present when `sl_hdr_cancel_flag` is `false`.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlHdrBody {
     /// `sl_hdr_persistence_flag`.
@@ -59,6 +61,7 @@ pub struct SlHdrBody {
 }
 
 /// Picture colour and luminance info (original or target picture).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlHdrPictureInfo {
     /// `*_picture_primaries` (8 bits).
@@ -70,6 +73,7 @@ pub struct SlHdrPictureInfo {
 }
 
 /// Source mastering display colour volume info.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SlHdrMdcvInfo {
     /// Chromaticity coordinates `[component][0=x, 1=y]` for 3 primaries
@@ -93,6 +97,7 @@ pub struct SlHdrMdcvInfo {
 /// targets should store the enclosing [`SlHdrMetadata`] in a `static` or
 /// equivalent.
 #[allow(clippy::large_enum_variant)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlHdrPayload {
     /// `sl_hdr_payload_mode == 0`: tone-mapping tables.
@@ -107,6 +112,7 @@ pub enum SlHdrPayload {
 }
 
 /// Tone-mapping payload (`sl_hdr_payload_mode == 0`).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SlHdrMode0 {
     /// `tone_mapping_input_signal_black_level_offset` (8 bits).
@@ -127,6 +133,7 @@ pub struct SlHdrMode0 {
 }
 
 /// Luminance/colour mapping payload (`sl_hdr_payload_mode == 1`).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SlHdrMode1 {
     /// `lm_uniform_sampling_flag`. When `true`, `luminance_mapping.x` is not
@@ -142,6 +149,7 @@ pub struct SlHdrMode1 {
 }
 
 /// A table of up to 15 (x, y) byte pairs.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SlHdrTable15 {
     /// Number of valid entries (up to 15).
@@ -178,6 +186,7 @@ impl Default for SlHdrTable127 {
 
 /// Raw extension data from `sl_hdr_extension_*` fields.
 #[cfg(any(feature = "alloc", feature = "std"))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlHdrExtension {
     /// `sl_hdr_extension_6bits` (6 bits).
@@ -542,3 +551,114 @@ impl SlHdrMetadata {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Manual serde impl for SlHdrTable127
+//
+// serde's derive supports arrays only up to 32 elements; `[u16; 127]` requires
+// a hand-written impl.  The format serialises only the `count` valid entries
+// (not all 127 slots), which is both smaller and more meaningful.
+// ---------------------------------------------------------------------------
+#[cfg(feature = "serde")]
+const _: () = {
+    use serde::de::{self, MapAccess, SeqAccess, Visitor};
+    use serde::ser::SerializeStruct;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    impl Serialize for SlHdrTable127 {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            let n = self.count as usize;
+            let mut st = s.serialize_struct("SlHdrTable127", 3)?;
+            st.serialize_field("count", &self.count)?;
+            st.serialize_field("x", &&self.x[..n])?;
+            st.serialize_field("y", &&self.y[..n])?;
+            st.end()
+        }
+    }
+
+    impl<'de> Deserialize<'de> for SlHdrTable127 {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            #[derive(serde::Deserialize)]
+            #[serde(field_identifier, rename_all = "lowercase")]
+            enum Field {
+                Count,
+                X,
+                Y,
+            }
+
+            /// Deserialise a sequence of up to 127 `u16` values into a
+            /// fixed-size `[u16; 127]` array without heap allocation.
+            struct Arr127(pub [u16; 127], pub u8);
+            impl<'de> Deserialize<'de> for Arr127 {
+                fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                    struct Seq127Visitor;
+                    impl<'de> Visitor<'de> for Seq127Visitor {
+                        type Value = Arr127;
+                        fn expecting(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+                            f.write_str("a sequence of up to 127 u16 values")
+                        }
+                        fn visit_seq<A: SeqAccess<'de>>(
+                            self,
+                            mut seq: A,
+                        ) -> Result<Arr127, A::Error> {
+                            let mut arr = [0u16; 127];
+                            let mut i = 0usize;
+                            while let Some(v) = seq.next_element()? {
+                                if i >= 127 {
+                                    return Err(de::Error::invalid_length(
+                                        i + 1,
+                                        &"at most 127 elements",
+                                    ));
+                                }
+                                arr[i] = v;
+                                i += 1;
+                            }
+                            Ok(Arr127(arr, i as u8))
+                        }
+                    }
+                    d.deserialize_seq(Seq127Visitor)
+                }
+            }
+
+            struct T127Visitor;
+            impl<'de> Visitor<'de> for T127Visitor {
+                type Value = SlHdrTable127;
+                fn expecting(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+                    f.write_str("struct SlHdrTable127")
+                }
+                fn visit_map<V: MapAccess<'de>>(
+                    self,
+                    mut map: V,
+                ) -> Result<SlHdrTable127, V::Error> {
+                    let mut count: Option<u8> = None;
+                    let mut x: Option<Arr127> = None;
+                    let mut y: Option<Arr127> = None;
+                    while let Some(key) = map.next_key()? {
+                        match key {
+                            Field::Count => {
+                                count = Some(map.next_value()?);
+                            }
+                            Field::X => {
+                                x = Some(map.next_value()?);
+                            }
+                            Field::Y => {
+                                y = Some(map.next_value()?);
+                            }
+                        }
+                    }
+                    let count = count.ok_or_else(|| de::Error::missing_field("count"))?;
+                    let x = x.ok_or_else(|| de::Error::missing_field("x"))?;
+                    let y = y.ok_or_else(|| de::Error::missing_field("y"))?;
+                    Ok(SlHdrTable127 {
+                        count,
+                        x: x.0,
+                        y: y.0,
+                    })
+                }
+            }
+
+            const FIELDS: &[&str] = &["count", "x", "y"];
+            d.deserialize_struct("SlHdrTable127", FIELDS, T127Visitor)
+        }
+    }
+};

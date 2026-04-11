@@ -2,6 +2,7 @@
 ///
 /// Identifies the transfer function applied to the content. This governs how
 /// the sink maps signal values to display luminance.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Eotf {
@@ -27,6 +28,7 @@ pub enum Eotf {
 ///
 /// Primary order follows CTA-861 / SMPTE ST 2086: green first, then blue,
 /// then red.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StaticMetadataType1 {
     /// Mastering display green primary chromaticity (x, y) × 50 000.
@@ -48,6 +50,7 @@ pub struct StaticMetadataType1 {
 }
 
 /// Static metadata payload, selected by the descriptor ID field (PB1 bits 5–3).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum StaticMetadata {
@@ -68,6 +71,7 @@ pub enum StaticMetadata {
 ///
 /// Carries the EOTF and the static HDR metadata for the content being
 /// transmitted. Required for HDR10 and HLG content.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HdrStaticInfoFrame {
     /// Electro-optical transfer function (EOTF, PB1 bits 2–0).

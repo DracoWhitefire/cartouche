@@ -10,6 +10,7 @@ use crate::warn::AviWarning;
 /// Indicates which bar data fields in PB6–PB13 carry valid measurements.
 /// Fields not indicated as present contain undefined bytes on the wire and
 /// should not be interpreted.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum BarInfo {
@@ -26,6 +27,7 @@ pub enum BarInfo {
 /// Scan information (S field, PB1 bits 1–0).
 ///
 /// Describes how the source expects the sink to handle overscan.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ScanInfo {
@@ -42,6 +44,7 @@ pub enum ScanInfo {
 /// When set to [`Extended`](Colorimetry::Extended), the
 /// [`extended_colorimetry`](AviInfoFrame::extended_colorimetry) field carries the
 /// precise colorimetry value.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Colorimetry {
@@ -59,6 +62,7 @@ pub enum Colorimetry {
 ///
 /// Only meaningful when [`colorimetry`](AviInfoFrame::colorimetry) is
 /// [`Colorimetry::Extended`].
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ExtendedColorimetry {
@@ -84,6 +88,7 @@ pub enum ExtendedColorimetry {
 }
 
 /// Picture aspect ratio (M field, PB2 bits 5–4).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PictureAspectRatio {
@@ -99,6 +104,7 @@ pub enum PictureAspectRatio {
 ///
 /// Only meaningful when [`color_format`](AviInfoFrame::color_format) is
 /// [`ColorFormat::Rgb444`].
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RgbQuantization {
@@ -114,6 +120,7 @@ pub enum RgbQuantization {
 ///
 /// Only meaningful when [`color_format`](AviInfoFrame::color_format) is a
 /// YCbCr variant.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum YccQuantization {
@@ -124,6 +131,7 @@ pub enum YccQuantization {
 }
 
 /// Non-uniform picture scaling (SC field, PB3 bits 1–0).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NonUniformScaling {
@@ -140,6 +148,7 @@ pub enum NonUniformScaling {
 /// IT content type (CN field, PB5 bits 5–4).
 ///
 /// Only meaningful when [`it_content`](AviInfoFrame::it_content) is `true`.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ItContentType {
@@ -171,6 +180,7 @@ pub enum ItContentType {
 /// - PB8–PB9: `bottom_bar` (little-endian)
 /// - PB10–PB11: `left_bar` (little-endian)
 /// - PB12–PB13: `right_bar` (little-endian)
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AviInfoFrame {
     // ---- PB1 ----
