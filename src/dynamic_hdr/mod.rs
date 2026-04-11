@@ -188,6 +188,7 @@ impl BitWriter {
 /// site; callers on targets with limited stack may wish to store it in a
 /// `static`.
 #[allow(clippy::large_enum_variant)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DynamicHdrInfoFrame {
@@ -497,6 +498,7 @@ impl IntoPackets for DynamicHdrInfoFrame {
 /// Byte 7 (PB3):    format_id  — metadata format identifier
 /// Bytes 8–30 (PB4–26): chunk  — up to 23 metadata bytes
 /// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct DynamicHdrFragment {
