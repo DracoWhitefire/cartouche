@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`display-types` updated to 0.4** — tracks DisplayID 2.x support added in `piaf` 0.4.1.
 
+### Fixed
+
+- `DynamicHdrInfoFrame::decode_sequence` — replaced two `match ... { Ok(v) => v, Err(e) => return Err(e) }`
+  blocks with `?`, fixing a `clippy::question_mark` failure under current toolchain lints.
+- `Arr127` (internal `serde` deserialization helper in `slhdr.rs`) — dropped its unused length
+  field; the count was already sourced from the sibling `count` field on `SlHdrTable127`, so
+  this was genuine dead code, not just an unused-but-needed value.
+
 ## [0.2.0] - 2026-04-11
 
 ### Added
