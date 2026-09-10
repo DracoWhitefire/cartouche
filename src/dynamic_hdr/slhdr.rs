@@ -588,7 +588,7 @@ const _: () = {
 
             /// Deserialise a sequence of up to 127 `u16` values into a
             /// fixed-size `[u16; 127]` array without heap allocation.
-            struct Arr127(pub [u16; 127], pub u8);
+            struct Arr127(pub [u16; 127]);
             impl<'de> Deserialize<'de> for Arr127 {
                 fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
                     struct Seq127Visitor;
@@ -613,7 +613,7 @@ const _: () = {
                                 arr[i] = v;
                                 i += 1;
                             }
-                            Ok(Arr127(arr, i as u8))
+                            Ok(Arr127(arr))
                         }
                     }
                     d.deserialize_seq(Seq127Visitor)
