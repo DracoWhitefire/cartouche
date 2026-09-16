@@ -318,14 +318,14 @@ impl DynamicHdrInfoFrame {
                 }
             };
             match format_id {
-                0x02 => match SlHdrMetadata::decode(payload, &mut push_fmt_warn) {
-                    Ok(meta) => DynamicHdrInfoFrame::SlHdr(meta),
-                    Err(e) => return Err(e),
-                },
-                0x04 => match Hdr10PlusMetadata::decode(payload, &mut push_fmt_warn) {
-                    Ok(meta) => DynamicHdrInfoFrame::Hdr10Plus(meta),
-                    Err(e) => return Err(e),
-                },
+                0x02 => {
+                    let meta = SlHdrMetadata::decode(payload, &mut push_fmt_warn)?;
+                    DynamicHdrInfoFrame::SlHdr(meta)
+                }
+                0x04 => {
+                    let meta = Hdr10PlusMetadata::decode(payload, &mut push_fmt_warn)?;
+                    DynamicHdrInfoFrame::Hdr10Plus(meta)
+                }
                 _ => {
                     #[cfg(any(feature = "alloc", feature = "std"))]
                     {
