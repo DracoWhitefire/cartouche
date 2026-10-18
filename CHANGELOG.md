@@ -19,6 +19,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   field; the count was already sourced from the sibling `count` field on `SlHdrTable127`, so
   this was genuine dead code, not just an unused-but-needed value.
 
+### Internal
+
+- **CI builds with `--locked`** — every cargo command in CI and the publish workflow uses
+  `Cargo.lock` as committed, so a lock file that no longer matches the manifests fails the
+  build instead of being re-resolved silently. `fuzz/Cargo.lock` still recorded cartouche
+  0.1.0 and display-types 0.3.1 and is refreshed.
+- **Publishing uses crates.io trusted publishing** — `publish.yml` obtains a short-lived
+  token through OIDC (`rust-lang/crates-io-auth-action`, revoked at the end of the job, and
+  short-lived regardless) instead of the long-lived `CARGO_REGISTRY_TOKEN` secret. The
+  upload job runs in the `release` environment, which only `v*` tags can deploy to and
+  which requires a maintainer's approval. Quality gates moved to a separate `verify` job,
+  so no dependency build scripts run and no cache is restored where publishing credentials
+  exist. The attested `.crate` is kept as a separate copy; after upload the job fails if
+  crates.io's checksum differs from it, and that same copy is attached to the GitHub
+  release. Re-running a partially failed publish reuses an existing GitHub release.
+  `publish.yml` refuses tags that do not match the `Cargo.toml` version, and gains a
+  `workflow_dispatch` trigger for `release-tag` (tags pushed with `GITHUB_TOKEN` start no
+  push-triggered workflows); dispatches against a non-tag ref are skipped.
+- **Release summary before approval** — `publish.yml` gains a `summary` job that shows the
+  crate, version and commit, changes since the previous published release (ignoring
+  pre-release or malformed tags, and flagging a baseline that is not on crates.io), changes
+  to workflow, toolchain and build configuration, manifest changes, the changelog section,
+  and the `.crate` sha256 with a command to reproduce it, on the run page while the publish
+  job waits for approval. The publish job refuses to attest a package whose sha256 differs
+  from the reviewed one.
+- **Release workflows** — `release-prep` picks the version bump with `cargo-semver-checks`
+  (`auto`, or checks an explicit bump), stamps the changelog, refreshes `Cargo.lock` and
+  `fuzz/Cargo.lock` (cartouche's own entry only) and opens a `Release vX.Y.Z` PR.
+  `release-tag` checks that CI and the fuzz smoke run passed on `develop` (and says so when
+  a run has not finished yet), promotes `develop` to `main` through a `release-promote/v*`
+  branch and PR, fails if that merge fails, tags only when `main` holds exactly the
+  promoted tree, and dispatches `publish.yml` for the tag; it also accepts a squash-merged
+  release commit (`Release vX.Y.Z (#N)`). Both fail when started from a branch other than
+  `develop`. Releases were previously tagged by hand. The version bumped on `develop`
+  ahead of a release (0.3.0) is back at the published 0.2.0, so release-prep stamps it.
+- **No CI or fuzz run on promotion PRs** — CI and the fuzz workflow no longer run on pull
+  requests into `main`. The only ones are `release-tag`'s `release-promote/*` PRs, whose
+  content already passed both on `develop`; opened by `github-actions[bot]`, their runs
+  would be held for approval and listed as `action_required` or failed.
+- **Supply-chain hardening for CI** — every third-party action is pinned to a commit SHA
+  of a release tag, with `dependabot.yml` keeping the pins (and both `Cargo.lock`s, the
+  crate's and the fuzz crate's) current. The Rust toolchains themselves still follow
+  `stable` and `nightly`. `cargo-semver-checks` and `cargo-llvm-cov` are installed as
+  checksum-verified prebuilt binaries by the pinned `install-action`; `cargo-fuzz` is
+  installed from crates.io at a fixed version, with its lock file, instead of the latest.
+  The security audit also runs weekly.
+- **README documents release provenance** — a badge shows whether crates.io requires trusted
+  publishing for this crate, and "Verifying releases" now states that 0.1.0 and 0.2.0 were
+  uploaded with an API token (0.1.0 by hand, without provenance), that later releases use
+  trusted publishing, and how to look up a version's publishing details on crates.io.
+
 ## [0.2.0] - 2026-04-11
 
 ### Added
