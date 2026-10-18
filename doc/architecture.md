@@ -512,6 +512,8 @@ encoding or decoding behaviour.
   successfully (possibly with warnings) or returns `DecodeError::Truncated` — no other
   outcome is acceptable; and encode followed by decode is identity for well-formed
   frames.
-- **Attested releases.** Every release is published through a GitHub Actions workflow
-  that signs the `.crate` package with [SLSA Build Level 2](https://slsa.dev) provenance.
-  Verify with `gh attestation verify <file> --repo DracoWhitefire/cartouche`.
+- **Attested releases.** From 0.2.0, every release is published through a GitHub Actions
+  workflow that signs the `.crate` package with [SLSA Build Level 2](https://slsa.dev)
+  provenance, and releases after 0.2.0 use crates.io trusted publishing. Verify with
+  `gh attestation verify <file> --repo DracoWhitefire/cartouche`. 0.1.0 was uploaded by
+  hand, without provenance.
