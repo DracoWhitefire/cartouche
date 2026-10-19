@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Part of Ashlar** — the README now opens with a block naming the
+  [Ashlar](https://ashlar-display.org) stack and linking the other crates in it. Keywords
+  are aligned across the stack, with `ashlar` and `hdmi` on every crate; `ashlar` and `hdr`
+  are added, `display` and `hardware` are dropped. Categories: `parser-implementations` is
+  replaced by `no-std` and `no-std::no-alloc` (`encoding` already covers both directions).
+  The crate's `homepage` is now the Ashlar website.
+
 - `doc/roadmap.md` drops its "Shipped" section, a stale copy of what this changelog
   records; the roadmap lists only what is planned.
 

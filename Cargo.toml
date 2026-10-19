@@ -7,8 +7,9 @@ description = "Encoding and decoding for HDMI InfoFrames."
 readme = "README.md"
 license = "MPL-2.0"
 repository = "https://github.com/DracoWhitefire/cartouche"
-keywords = ["hdmi", "infoframe", "no-std", "display", "hardware"]
-categories = ["hardware-support", "embedded", "encoding", "parser-implementations"]
+homepage = "https://ashlar-display.org"
+keywords = ["ashlar", "hdmi", "no-std", "infoframe", "hdr"]
+categories = ["hardware-support", "embedded", "encoding", "no-std", "no-std::no-alloc"]
 
 [features]
 default = ["std"]
