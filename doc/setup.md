@@ -5,7 +5,7 @@
 ## Clone and build
 
 ```sh
-git clone https://github.com/DracoWhitefire/cartouche.git
+git clone https://github.com/ashlar-display/cartouche.git
 cd cartouche
 cargo build
 ```

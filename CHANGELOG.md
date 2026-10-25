@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `doc/roadmap.md` drops its "Shipped" section, a stale copy of what this changelog
   records; the roadmap lists only what is planned.
+- **Moved to the `ashlar-display` organization** — the repository is now
+  `ashlar-display/cartouche` (the old URLs redirect), and `repository` points there.
+  Releases are attested and published from the new repository; 0.2.0 and 0.3.0, attested
+  before the move, verify with `--owner DracoWhitefire --signer-repo
+  DracoWhitefire/cartouche` (see "Verifying releases" in the README). The code of conduct
+  is now the organization's, shared by every Ashlar repository; the repository's own copy
+  is removed.
 
 ## [0.3.0] - 2026-10-18
 
