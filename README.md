@@ -1,9 +1,9 @@
 # cartouche
 
-[![CI](https://github.com/DracoWhitefire/cartouche/actions/workflows/ci.yml/badge.svg)](https://github.com/DracoWhitefire/cartouche/actions/workflows/ci.yml)
+[![CI](https://github.com/ashlar-display/cartouche/actions/workflows/ci.yml/badge.svg)](https://github.com/ashlar-display/cartouche/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/cartouche.svg)](https://crates.io/crates/cartouche)
 [![docs.rs](https://docs.rs/cartouche/badge.svg)](https://docs.rs/cartouche)
-[![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](https://github.com/DracoWhitefire/cartouche/blob/main/LICENSE)
+[![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](https://github.com/ashlar-display/cartouche/blob/main/LICENSE)
 [![Rust 1.85+](https://img.shields.io/badge/rustc-1.85+-orange.svg)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0.html)
 [![SLSA Level 2](https://slsa.dev/images/gh-badge-level2.svg)](https://slsa.dev)
 [![trusted publishing only](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fcrates.io%2Fapi%2Fv1%2Fcrates%2Fcartouche&query=%24.crate.trustpub_only&label=trusted%20publishing%20only)](#verifying-releases)
@@ -195,11 +195,19 @@ Releases from v0.2.0 onwards are built on GitHub Actions and attested with
 [GitHub CLI](https://cli.github.com/) and run:
 
 ```sh
-gh attestation verify cartouche-X.Y.Z.crate --repo DracoWhitefire/cartouche
+gh attestation verify cartouche-X.Y.Z.crate --repo ashlar-display/cartouche
+```
+
+Releases from before the repository moved to the `ashlar-display` organization (0.2.0 and
+0.3.0) were attested under its previous owner, and verify against it:
+
+```sh
+gh attestation verify cartouche-X.Y.Z.crate --owner DracoWhitefire \
+  --signer-repo DracoWhitefire/cartouche
 ```
 
 The attested `.crate` is attached to each
-[GitHub release](https://github.com/DracoWhitefire/cartouche/releases).
+[GitHub release](https://github.com/ashlar-display/cartouche/releases).
 
 Releases after 0.2.0 are also uploaded through crates.io
 [trusted publishing](https://rust-lang.github.io/rfcs/3691-trusted-publishing-cratesio.html): the publish

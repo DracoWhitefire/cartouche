@@ -515,5 +515,6 @@ encoding or decoding behaviour.
 - **Attested releases.** From 0.2.0, every release is published through a GitHub Actions
   workflow that signs the `.crate` package with [SLSA Build Level 2](https://slsa.dev)
   provenance, and releases after 0.2.0 use crates.io trusted publishing. Verify with
-  `gh attestation verify <file> --repo DracoWhitefire/cartouche`. 0.1.0 was uploaded by
-  hand, without provenance.
+  `gh attestation verify <file> --repo ashlar-display/cartouche` (0.2.0 and 0.3.0, from
+  before the move to the `ashlar-display` organization: see "Verifying releases" in the
+  README). 0.1.0 was uploaded by hand, without provenance.
